@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # pos_system
 
 A new Flutter project.
@@ -14,3 +15,7 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# Mobile-Point-of-Sale-Application
+Developing a Mobile Point of Sale Application for minimarts that has inventory management, sales transactions and financial report. Using Firebase, Flutter and Dart. 
+>>>>>>> ffa4e45a3f5433eb053fc1d2b3ed8ae8fd8fd86f
