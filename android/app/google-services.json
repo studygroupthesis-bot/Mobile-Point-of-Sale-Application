@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "1044525737065",
+    "firebase_url": "https://fir-pos-system-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "fir-pos-system",
+    "storage_bucket": "fir-pos-system.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1044525737065:android:86913f2e25bd799daeeef8",
+        "android_client_info": {
+          "package_name": "com.example.pointofsales_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdMfi9EOANATRCQolBHPR3ZLohtOXSjFk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1044525737065:android:67d6448297e9a6fdaeeef8",
+        "android_client_info": {
+          "package_name": "com.example.pos_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdMfi9EOANATRCQolBHPR3ZLohtOXSjFk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
