@@ -85,8 +85,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     try {
       final price = double.tryParse(_priceController.text.trim()) ?? 0;
-      final stockQty =
-          int.tryParse(
+      final stockQty = int.tryParse(
             _stockQtyController.text.trim().isEmpty
                 ? '0'
                 : _stockQtyController.text.trim(),
@@ -103,15 +102,13 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         'barcode': _barcodeController.text.trim(),
         'trackStock': _trackStock,
         'stockQty': _trackStock ? stockQty : null,
-        'representationType': _representationType == RepresentationType.color
-            ? 'color'
-            : 'image',
+        'representationType':
+            _representationType == RepresentationType.color ? 'color' : 'image',
         'colorValue': _representationType == RepresentationType.color
             ? _selectedColor.value
             : null,
-        'imageUrl': _representationType == RepresentationType.image
-            ? imageUrl
-            : null,
+        'imageUrl':
+            _representationType == RepresentationType.image ? imageUrl : null,
         'createdAt': FieldValue.serverTimestamp(),
       };
 
@@ -288,7 +285,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 TextFormField(
                   controller: _priceController,
                   decoration: const InputDecoration(labelText: 'Price'),
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   validator: (value) => value == null || value.trim().isEmpty
                       ? 'Price is required'
                       : null,
