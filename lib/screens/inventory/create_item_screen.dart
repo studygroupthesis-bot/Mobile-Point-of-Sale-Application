@@ -2,10 +2,11 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+
+import '../../services/cloudinary_service.dart';
 
 enum SoldBy { each, weight }
 enum RepresentationType { color, image }
@@ -59,13 +60,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception("Not logged in. Please login again.");
+    if (user == null) {
+      throw Exception("Not logged in. Please login again.");
+    }
 
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
-      throw Exception("Missing storeId in users/${user.uid}.");
+      throw Exception(
+        "Missing storeId in users/${user.uid}. Add storeId to the user profile.",
+      );
     }
     return storeId;
   }
@@ -82,20 +90,26 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     });
   }
 
-  /// ✅ One upload function: works on Web + Mobile (no dart:io)
-  Future<String?> _uploadImageBytes({required String storeId}) async {
-    if (_representationType != RepresentationType.image) return null;
-    if (_pickedImage == null || _imageBytes == null) return null;
+  Future<Map<String, String>?> _uploadImageIfNeeded() async {
+    if (_representationType != RepresentationType.image ||
+        _pickedImage == null ||
+        _imageBytes == null) {
+      return null;
+    }
 
-    final safeName = _nameController.text.trim().replaceAll(' ', '_');
-    final fileName =
-        'stores/$storeId/items/${DateTime.now().millisecondsSinceEpoch}_$safeName.jpg';
+    final res = await CloudinaryService.uploadBytes(
+      bytes: _imageBytes!,
+      filename: _pickedImage!.name,
+    );
 
-    final ref = FirebaseStorage.instance.ref().child(fileName);
-    final meta = SettableMetadata(contentType: 'image/jpeg');
+    final imageUrl = res["secure_url"] as String?;
+    final publicId = res["public_id"] as String?;
 
-    final snap = await ref.putData(_imageBytes!, meta);
-    return snap.ref.getDownloadURL();
+    if (imageUrl == null || publicId == null) {
+      throw Exception("Cloudinary response missing secure_url or public_id.");
+    }
+
+    return {"imageUrl": imageUrl, "imagePublicId": publicId};
   }
 
   Future<void> _saveItem() async {
@@ -114,9 +128,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
           ) ??
           0;
 
-      final imageUrl = await _uploadImageBytes(storeId: storeId);
+      final upload = await _uploadImageIfNeeded();
+      final imageUrl = upload?["imageUrl"];
+      final imagePublicId = upload?["imagePublicId"];
 
-      final itemData = <String, dynamic>{
+      final itemData = {
         'name': _nameController.text.trim(),
         'category': _categoryController.text.trim(),
         'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
@@ -126,17 +142,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         'stockQty': _trackStock ? stockQty : null,
         'representationType':
             _representationType == RepresentationType.color ? 'color' : 'image',
-
-        // ✅ FIX: Color.value deprecated
-        'colorValue': _representationType == RepresentationType.color
-            ? _selectedColor.toARGB32()
-            : null,
-
-        'imageUrl':
-            _representationType == RepresentationType.image ? imageUrl : null,
-        'createdAt': FieldValue.serverTimestamp(),
+        'colorValue':
+            _representationType == RepresentationType.color ? _selectedColor.toARGB32() : null,
+        'imageUrl': _representationType == RepresentationType.image ? imageUrl : null,
+        'imagePublicId':
+            _representationType == RepresentationType.image ? imagePublicId : null,
+        'created_at': FieldValue.serverTimestamp(),
       };
 
+      
       await FirebaseFirestore.instance
           .collection('stores')
           .doc(storeId)
@@ -184,39 +198,34 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       children: [
         const Text('Representation'),
         const SizedBox(height: 8),
-
-        // ✅ FIX: nullable-safe onChanged
         RadioGroup<RepresentationType>(
-          groupValue: _representationType,
-          onChanged: (RepresentationType? v) {
-            if (v == null) return;
-            setState(() {
-              _representationType = v;
-              if (v == RepresentationType.color) {
-                _pickedImage = null;
-                _imageBytes = null;
-              }
-            });
-          },
-          child: const Row(
-            children: [
-              Radio<RepresentationType>(value: RepresentationType.color),
-              Text('Color'),
-              SizedBox(width: 16),
-              Radio<RepresentationType>(value: RepresentationType.image),
-              Text('Image'),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
+        groupValue: _representationType,
+        onChanged: (RepresentationType? value) {
+          if (value == null) return;
+         setState(() {
+            _representationType = value;
+             if (value == RepresentationType.color) {
+           _pickedImage = null;
+           _imageBytes = null;
+         }
+       });
+      },
+       child: const Row(
+        children: [
+        Radio<RepresentationType>(value: RepresentationType.color),
+        Text('Color'),
+        SizedBox(width: 16),
+        Radio<RepresentationType>(value: RepresentationType.image),
+        Text('Image'),
+         ],
+      ),
+    ),
+       const SizedBox(height: 8),
         if (_representationType == RepresentationType.color)
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: _availableColors.map((c) {
-              final isSelected = c == _selectedColor;
               return GestureDetector(
                 onTap: () => setState(() => _selectedColor = c),
                 child: Container(
@@ -227,10 +236,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       width: 2,
-                      color: isSelected ? Colors.black : Colors.transparent,
+                      color: c == _selectedColor ? Colors.black : Colors.transparent,
                     ),
                   ),
-                  child: isSelected
+                  child: c == _selectedColor
                       ? const Icon(Icons.check, size: 20, color: Colors.white)
                       : null,
                 ),
@@ -246,7 +255,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 height: 120,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey),
+                  border: Border.all(color: Colors.grey.shade400),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: _imageBytes == null
@@ -269,6 +278,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                 ],
               ),
+              if (kIsWeb)
+                const Text(
+                  "Camera is disabled on web preview. Use Choose Photo.",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
             ],
           ),
       ],
@@ -294,8 +308,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                  validator: (value) =>
+                      value == null || value.trim().isEmpty ? 'Name is required' : null,
                 ),
                 TextFormField(
                   controller: _categoryController,
@@ -307,10 +321,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 TextFormField(
                   controller: _priceController,
                   decoration: const InputDecoration(labelText: 'Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Price is required' : null,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  validator: (value) =>
+                      value == null || value.trim().isEmpty ? 'Price is required' : null,
                 ),
                 TextFormField(
                   controller: _barcodeController,
