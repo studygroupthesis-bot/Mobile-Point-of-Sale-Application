@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/cloudinary_service.dart';
 
 enum SoldBy { each, weight }
+
 enum RepresentationType { color, image }
 
 class CreateItemScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _nameController = TextEditingController();
   final _categoryController = TextEditingController();
   final _priceController = TextEditingController();
+  final _costController = TextEditingController(); // ✅ NEW
   final _barcodeController = TextEditingController();
   final _stockQtyController = TextEditingController();
 
@@ -53,6 +55,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     _nameController.dispose();
     _categoryController.dispose();
     _priceController.dispose();
+    _costController.dispose(); // ✅ NEW
     _barcodeController.dispose();
     _stockQtyController.dispose();
     super.dispose();
@@ -112,6 +115,19 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     return {"imageUrl": imageUrl, "imagePublicId": publicId};
   }
 
+  String? _validateRequired(String? value, String field) {
+    if (value == null || value.trim().isEmpty) return '$field is required';
+    return null;
+  }
+
+  String? _validateMoney(String? value, String field) {
+    if (value == null || value.trim().isEmpty) return '$field is required';
+    final n = double.tryParse(value.trim());
+    if (n == null) return 'Enter a valid number';
+    if (n < 0) return '$field cannot be negative';
+    return null;
+  }
+
   Future<void> _saveItem() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -121,6 +137,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       final storeId = await _requireStoreId();
 
       final price = double.tryParse(_priceController.text.trim()) ?? 0;
+      final cost = double.tryParse(_costController.text.trim()) ?? 0; // ✅ NEW
+
       final stockQty = int.tryParse(
             _stockQtyController.text.trim().isEmpty
                 ? '0'
@@ -137,20 +155,23 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         'category': _categoryController.text.trim(),
         'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
         'price': price,
+        'cost': cost, // ✅ NEW
         'barcode': _barcodeController.text.trim(),
         'trackStock': _trackStock,
         'stockQty': _trackStock ? stockQty : null,
         'representationType':
             _representationType == RepresentationType.color ? 'color' : 'image',
-        'colorValue':
-            _representationType == RepresentationType.color ? _selectedColor.toARGB32() : null,
-        'imageUrl': _representationType == RepresentationType.image ? imageUrl : null,
-        'imagePublicId':
-            _representationType == RepresentationType.image ? imagePublicId : null,
+        'colorValue': _representationType == RepresentationType.color
+            ? _selectedColor.toARGB32()
+            : null,
+        'imageUrl':
+            _representationType == RepresentationType.image ? imageUrl : null,
+        'imagePublicId': _representationType == RepresentationType.image
+            ? imagePublicId
+            : null,
         'created_at': FieldValue.serverTimestamp(),
       };
 
-      
       await FirebaseFirestore.instance
           .collection('stores')
           .doc(storeId)
@@ -199,28 +220,28 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         const Text('Representation'),
         const SizedBox(height: 8),
         RadioGroup<RepresentationType>(
-        groupValue: _representationType,
-        onChanged: (RepresentationType? value) {
-          if (value == null) return;
-         setState(() {
-            _representationType = value;
-             if (value == RepresentationType.color) {
-           _pickedImage = null;
-           _imageBytes = null;
-         }
-       });
-      },
-       child: const Row(
-        children: [
-        Radio<RepresentationType>(value: RepresentationType.color),
-        Text('Color'),
-        SizedBox(width: 16),
-        Radio<RepresentationType>(value: RepresentationType.image),
-        Text('Image'),
-         ],
-      ),
-    ),
-       const SizedBox(height: 8),
+          groupValue: _representationType,
+          onChanged: (RepresentationType? value) {
+            if (value == null) return;
+            setState(() {
+              _representationType = value;
+              if (value == RepresentationType.color) {
+                _pickedImage = null;
+                _imageBytes = null;
+              }
+            });
+          },
+          child: const Row(
+            children: [
+              Radio<RepresentationType>(value: RepresentationType.color),
+              Text('Color'),
+              SizedBox(width: 16),
+              Radio<RepresentationType>(value: RepresentationType.image),
+              Text('Image'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
         if (_representationType == RepresentationType.color)
           Wrap(
             spacing: 8,
@@ -236,7 +257,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       width: 2,
-                      color: c == _selectedColor ? Colors.black : Colors.transparent,
+                      color: c == _selectedColor
+                          ? Colors.black
+                          : Colors.transparent,
                     ),
                   ),
                   child: c == _selectedColor
@@ -272,7 +295,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                   const SizedBox(width: 8),
                   TextButton.icon(
-                    onPressed: kIsWeb ? null : () => _pickImage(ImageSource.camera),
+                    onPressed:
+                        kIsWeb ? null : () => _pickImage(ImageSource.camera),
                     icon: const Icon(Icons.camera_alt),
                     label: const Text('Take Photo'),
                   ),
@@ -305,26 +329,40 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
+
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty ? 'Name is required' : null,
+                  validator: (v) => _validateRequired(v, 'Name'),
                 ),
                 TextFormField(
                   controller: _categoryController,
                   decoration: const InputDecoration(labelText: 'Category'),
                 ),
+
                 const SizedBox(height: 12),
                 _buildSoldByRow(),
                 const SizedBox(height: 12),
+
                 TextFormField(
                   controller: _priceController,
-                  decoration: const InputDecoration(labelText: 'Price'),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  validator: (value) =>
-                      value == null || value.trim().isEmpty ? 'Price is required' : null,
+                  decoration: const InputDecoration(labelText: 'Selling Price'),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) => _validateMoney(v, 'Selling Price'),
                 ),
+
+                // ✅ COST FIELD (Owner input)
+                TextFormField(
+                  controller: _costController,
+                  decoration: const InputDecoration(
+                    labelText: 'Cost (Purchase Price)',
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) => _validateMoney(v, 'Cost'),
+                ),
+
                 TextFormField(
                   controller: _barcodeController,
                   decoration: const InputDecoration(
@@ -332,6 +370,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     suffixIcon: Icon(Icons.qr_code_scanner),
                   ),
                 ),
+
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -345,12 +384,15 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 if (_trackStock)
                   TextFormField(
                     controller: _stockQtyController,
-                    decoration: const InputDecoration(labelText: 'Stock Quantity'),
+                    decoration:
+                        const InputDecoration(labelText: 'Stock Quantity'),
                     keyboardType: TextInputType.number,
                   ),
+
                 const SizedBox(height: 16),
                 _buildRepresentationSection(),
                 const SizedBox(height: 24),
+
                 SizedBox(
                   width: double.infinity,
                   height: 48,

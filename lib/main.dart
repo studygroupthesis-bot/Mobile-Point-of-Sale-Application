@@ -1,36 +1,41 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'create_item_screen.dart';
+import 'package:device_preview/device_preview.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
-void main() async {
+import 'firebase/firebase_options.dart';
+import 'screens/auth/login_screen.dart'; // ⬅ import login screen
+// import 'app/app.dart';  // temporarily disable until after login
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(const MyApp());
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  print("Firebase apps count: ${Firebase.apps.length}");
+
+  runApp(
+    DevicePreview(
+      enabled: kIsWeb,
+      builder: (context) => const PopPayRoot(),
+    ),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PopPayRoot extends StatelessWidget {
+  const PopPayRoot({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MPOS App',
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Firebase Connected')),
-        body: Center(
-          child: ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateItemScreen(),
-                ),
-              );
-            },
-            child: const Text("Go to Create Item Screen"),
-          ),
-        ),
+      useInheritedMediaQuery: true,
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        fontFamily: 'Inter',
       ),
+      home: const LoginScreen(), // ⬅ LOGIN NOW LOADS FIRST
     );
   }
 }

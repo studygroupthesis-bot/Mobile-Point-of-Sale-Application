@@ -1,15 +1,19 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
-class TransactionItem {
+class CartItem {
+  final String itemId;
   final String name;
+  final String? barcode;
   final double price;
   int qty;
 
-  TransactionItem({
+  CartItem({
+    required this.itemId,
     required this.name,
     required this.price,
+    this.barcode,
     this.qty = 1,
   });
 
@@ -24,36 +28,275 @@ class TransactionScreen extends StatefulWidget {
 }
 
 class _TransactionScreenState extends State<TransactionScreen> {
-  final List<TransactionItem> _items = [];
+  final _searchController = TextEditingController();
+  final List<CartItem> _cart = [];
 
-  // TEMP: Manual add for now (later: barcode)
-  void _addSampleItem() {
-    setState(() {
-      _items.add(TransactionItem(
-        name: "Century Tuna",
-        price: 50.0,
-        qty: 1,
-      ));
-      _items.add(TransactionItem(
-        name: "Century Tuna Spicy",
-        price: 50.0,
-        qty: 1,
-      ));
-    });
+  bool _loadingAdd = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  Future<void> scanBarcode() async {
-    _addSampleItem();
+  // ---------- Helpers ----------
+  Future<String> _requireStoreId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception("Not logged in.");
+
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
+    final storeId = snap.data()?['storeId'] as String?;
+    if (storeId == null || storeId.isEmpty) {
+      throw Exception("Missing storeId in users/${user.uid}.");
+    }
+    return storeId;
   }
 
-  double get subtotal => _items.fold(0, (total, item) => total + item.total);
+  double get subtotal => _cart.fold(0, (t, i) => t + i.total);
   double get vat12 => subtotal * 0.12;
   double get grandTotal => subtotal + vat12;
 
+  void _addOrMergeCartItem({
+    required String itemId,
+    required String name,
+    required double price,
+    required int qty,
+    String? barcode,
+  }) {
+    final idx = _cart.indexWhere((e) => e.itemId == itemId);
+    setState(() {
+      if (idx >= 0) {
+        _cart[idx].qty += qty;
+      } else {
+        _cart.add(CartItem(
+          itemId: itemId,
+          name: name,
+          price: price,
+          qty: qty,
+          barcode: barcode,
+        ));
+      }
+    });
+  }
+
+  Future<int?> _askQuantity({required String itemName}) async {
+    final controller = TextEditingController(text: "1");
+
+    final qty = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Quantity"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Add quantity for:\n$itemName"),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: "Quantity",
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final q = int.tryParse(controller.text.trim());
+              if (q == null || q <= 0) return;
+              Navigator.pop(ctx, q);
+            },
+            child: const Text("Add"),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+    return qty;
+  }
+
+  // ---------- Firestore item lookup ----------
+  Future<void> _addItemByBarcode(String barcode) async {
+    if (barcode.trim().isEmpty) return;
+
+    setState(() => _loadingAdd = true);
+    try {
+      final storeId = await _requireStoreId();
+
+      final q = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .collection('items')
+          .where('barcode', isEqualTo: barcode.trim())
+          .limit(1)
+          .get();
+
+      if (q.docs.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No item found for barcode: $barcode')),
+        );
+        return;
+      }
+
+      final doc = q.docs.first;
+      final data = doc.data();
+
+      final itemName = (data['name'] ?? '').toString();
+      final price = (data['price'] as num?)?.toDouble() ?? 0.0;
+      final itemBarcode = (data['barcode'] ?? '').toString();
+
+      final qty = await _askQuantity(itemName: itemName);
+      if (qty == null) return;
+
+      _addOrMergeCartItem(
+        itemId: doc.id,
+        name: itemName,
+        price: price,
+        qty: qty,
+        barcode: itemBarcode,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error adding item: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingAdd = false);
+    }
+  }
+
+  Future<void> _addItemByNameSearch(String nameQuery) async {
+    final query = nameQuery.trim();
+    if (query.isEmpty) return;
+
+    setState(() => _loadingAdd = true);
+    try {
+      final storeId = await _requireStoreId();
+
+      // Simple "starts with" search using nameLower.
+      // If you don't have nameLower yet, see NOTE below.
+      final lower = query.toLowerCase();
+
+      final snap = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .collection('items')
+          .where('nameLower', isGreaterThanOrEqualTo: lower)
+          .where('nameLower', isLessThan: '${lower}')
+          .limit(10)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No items found for: $query')),
+        );
+        return;
+      }
+
+      // Let user pick from results
+      final pickedDoc = await showModalBottomSheet<
+          QueryDocumentSnapshot<Map<String, dynamic>>>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => ListView(
+          children: [
+            const ListTile(
+              title: Text("Select item to add"),
+            ),
+            ...snap.docs.map((doc) {
+              final d = doc.data();
+              final n = (d['name'] ?? '').toString();
+              final p = (d['price'] as num?)?.toDouble() ?? 0.0;
+              return ListTile(
+                title: Text(n),
+                subtitle: Text('₱ ${p.toStringAsFixed(2)}'),
+                onTap: () => Navigator.pop(ctx, doc),
+              );
+            }),
+          ],
+        ),
+      );
+
+      if (pickedDoc == null) return;
+
+      final d = pickedDoc.data();
+      final itemName = (d['name'] ?? '').toString();
+      final price = (d['price'] as num?)?.toDouble() ?? 0.0;
+      final itemBarcode = (d['barcode'] ?? '').toString();
+
+      final qty = await _askQuantity(itemName: itemName);
+      if (qty == null) return;
+
+      _addOrMergeCartItem(
+        itemId: pickedDoc.id,
+        name: itemName,
+        price: price,
+        qty: qty,
+        barcode: itemBarcode,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Search error: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingAdd = false);
+    }
+  }
+
+  // ---------- UI actions ----------
+  Future<void> _openBarcodeInputDialog() async {
+    final controller = TextEditingController();
+
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Scan / Enter Barcode"),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: "Barcode",
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text("Add"),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+
+    if (code == null || code.trim().isEmpty) return;
+    await _addItemByBarcode(code);
+  }
+
+  // ---------- Build ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7CBD0), // pink background
+      backgroundColor: const Color(0xFFF7CBD0),
       body: SafeArea(
         child: Center(
           child: Container(
@@ -73,9 +316,6 @@ class _TransactionScreenState extends State<TransactionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                //
-                // HEADER (STORE LOGO + STORE NAME)
-                //
                 const Row(
                   children: [
                     _StoreLogoCircle(size: 36),
@@ -83,26 +323,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     Expanded(child: _StoreNameOrAppTitle()),
                   ],
                 ),
-
                 const SizedBox(height: 16),
-
-                //
-                // BARCODE LABEL
-                //
                 const Text(
                   'Barcode Scanner',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
-
-                //
-                // BARCODE DISPLAY (STATIC)
-                //
                 GestureDetector(
-                  onTap: scanBarcode, // tap to simulate scan
+                  onTap: _openBarcodeInputDialog, // ✅ tap to scan/enter barcode
                   child: Container(
                     height: 90,
                     decoration: BoxDecoration(
@@ -110,7 +338,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
+                          color: Colors.black.withOpacity(0.05),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
@@ -131,23 +359,19 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 16),
-
-                //
-                // SEARCH + ADD BUTTON
-                //
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
+                        controller: _searchController,
                         decoration: InputDecoration(
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 10,
                           ),
-                          hintText: 'Search...',
+                          hintText: 'Search item name...',
                           filled: true,
                           fillColor: Colors.white,
                           border: OutlineInputBorder(
@@ -165,63 +389,61 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           borderRadius: BorderRadius.circular(24),
                         ),
                       ),
-                      onPressed: _addSampleItem,
-                      child: const Text('Add Item'),
+                      onPressed: _loadingAdd
+                          ? null
+                          : () => _addItemByNameSearch(_searchController.text),
+                      child: _loadingAdd
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Add Item'),
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 16),
-
-                //
-                // TRANSACTION TITLE
-                //
                 const Text(
                   'Transaction',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _items.isEmpty
+                  _cart.isEmpty
                       ? 'Scan/Add Item to transact…'
                       : 'Items in your transaction:',
                   style: const TextStyle(fontSize: 12),
                 ),
-
                 const SizedBox(height: 8),
-
-                //
-                // TRANSACTION LIST OR EMPTY PLACEHOLDER
-                //
                 Expanded(
-                  child: _items.isEmpty
+                  child: _cart.isEmpty
                       ? const Center(
                           child: Text(
                             'No items scanned yet',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.black54,
-                            ),
+                            style:
+                                TextStyle(fontSize: 13, color: Colors.black54),
                           ),
                         )
                       : ListView.builder(
                           padding: EdgeInsets.zero,
-                          itemCount: _items.length,
+                          itemCount: _cart.length,
                           itemBuilder: (context, index) {
-                            final item = _items[index];
+                            final item = _cart[index];
                             return Padding(
                               padding: const EdgeInsets.symmetric(
-                                vertical: 4,
+                                vertical: 6,
                                 horizontal: 4,
                               ),
                               child: Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text('${item.name}  x${item.qty}'),
+                                  Expanded(
+                                    child: Text(
+                                      '${item.name}  x${item.qty}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                   Text('₱ ${item.total.toStringAsFixed(2)}'),
                                 ],
                               ),
@@ -229,11 +451,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           },
                         ),
                 ),
-
-                //
-                // TOTALS (only if items exist)
-                //
-                if (_items.isNotEmpty) ...[
+                if (_cart.isNotEmpty) ...[
                   const Divider(),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -254,12 +472,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Grand Total',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      const Text('Grand Total',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                       Text(
                         '₱ ${grandTotal.toStringAsFixed(2)}',
                         style: const TextStyle(
@@ -270,12 +484,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     ],
                   ),
                 ],
-
                 const SizedBox(height: 14),
-
-                //
-                // TRANSACT BUTTON
-                //
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -286,7 +495,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    onPressed: _items.isEmpty ? null : () {},
+                    onPressed: _cart.isEmpty
+                        ? null
+                        : () {
+                            // TODO: Save transaction to Firestore (next step)
+                          },
                     child: const Text(
                       'TRANSACT',
                       style: TextStyle(
@@ -305,9 +518,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 }
 
-/// Shows store logo from Firestore:
-/// users/{uid}.storeId -> stores/{storeId}.logo_url
-/// Falls back to the "!" badge if no logo exists.
+/// ----- Keep your existing Store widgets (unchanged) -----
+
 class _StoreLogoCircle extends StatelessWidget {
   final double size;
   const _StoreLogoCircle({required this.size});
@@ -372,18 +584,12 @@ class _StoreLogoCircle extends StatelessWidget {
     return const Center(
       child: Text(
         '!',
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
       ),
     );
   }
 }
 
-/// Shows store business name from Firestore:
-/// users/{uid}.storeId -> stores/{storeId}.business_name
-/// Falls back to "POP2Pay" if no store name exists.
 class _StoreNameOrAppTitle extends StatelessWidget {
   const _StoreNameOrAppTitle();
 
@@ -413,11 +619,8 @@ class _StoreNameOrAppTitle extends StatelessWidget {
                 ? name.trim()
                 : 'POP2Pay';
 
-            return Text(
-              display,
-              style: _style,
-              overflow: TextOverflow.ellipsis,
-            );
+            return Text(display,
+                style: _style, overflow: TextOverflow.ellipsis);
           },
         );
       },

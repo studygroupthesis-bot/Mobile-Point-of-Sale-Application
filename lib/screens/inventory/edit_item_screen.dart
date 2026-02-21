@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/cloudinary_service.dart';
 
 enum SoldBy { each, weight }
+
 enum RepresentationType { color, image }
 
 class EditItemScreen extends StatefulWidget {
@@ -31,6 +32,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
   late TextEditingController name;
   late TextEditingController category;
   late TextEditingController price;
+  late TextEditingController cost; // ✅ NEW
   late TextEditingController barcode;
   late TextEditingController stockQty;
 
@@ -44,8 +46,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
   Uint8List? _imageBytes;
 
   String? _existingImageUrl;
-  // Kept only if you plan to delete old Cloudinary assets later.
-  // If you don't use it, remove this field to avoid "unused" warnings.
 
   bool saving = false;
 
@@ -63,7 +63,10 @@ class _EditItemScreenState extends State<EditItemScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception("Not logged in. Please login again.");
 
-    final snap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
       throw Exception("Missing storeId in users/${user.uid}.");
@@ -79,16 +82,17 @@ class _EditItemScreenState extends State<EditItemScreen> {
     name = TextEditingController(text: d['name'] ?? '');
     category = TextEditingController(text: d['category'] ?? '');
     price = TextEditingController(text: d['price']?.toString() ?? '');
+    cost = TextEditingController(text: d['cost']?.toString() ?? ''); // ✅ NEW
     barcode = TextEditingController(text: d['barcode'] ?? '');
     stockQty = TextEditingController(text: d['stockQty']?.toString() ?? '');
 
     soldBy = d['soldBy'] == 'weight' ? SoldBy.weight : SoldBy.each;
     trackStock = (d['trackStock'] as bool?) ?? false;
 
-    representation =
-        d['representationType'] == 'image' ? RepresentationType.image : RepresentationType.color;
+    representation = d['representationType'] == 'image'
+        ? RepresentationType.image
+        : RepresentationType.color;
 
-    // Safe color parsing (avoids runtime type crash)
     final cv = d['colorValue'];
     if (cv is int) {
       selectedColor = Color(cv);
@@ -96,6 +100,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
       selectedColor = Color(cv.toInt());
     }
 
+    _existingImageUrl = d['imageUrl'] as String?;
   }
 
   @override
@@ -103,6 +108,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
     name.dispose();
     category.dispose();
     price.dispose();
+    cost.dispose(); // ✅ NEW
     barcode.dispose();
     stockQty.dispose();
     super.dispose();
@@ -128,7 +134,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
       return {"imageUrl": "", "imagePublicId": ""};
     }
 
-    // No new pick => keep existing fields as-is
     if (_pickedImage == null || _imageBytes == null) return null;
 
     final res = await CloudinaryService.uploadBytes(
@@ -157,30 +162,29 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'name': name.text.trim(),
         'category': category.text.trim(),
         'price': double.tryParse(price.text.trim()) ?? 0,
+        'cost': double.tryParse(cost.text.trim()) ?? 0, // ✅ NEW
         'barcode': barcode.text.trim(),
         'soldBy': soldBy == SoldBy.each ? 'each' : 'weight',
         'trackStock': trackStock,
-        'representationType': representation == RepresentationType.color ? 'color' : 'image',
-        // Avoid deprecated Color.value by using toARGB32
-        'colorValue': representation == RepresentationType.color ? selectedColor.toARGB32() : null,
+        'representationType':
+            representation == RepresentationType.color ? 'color' : 'image',
+        'colorValue': representation == RepresentationType.color
+            ? selectedColor.toARGB32()
+            : null,
         'updated_at': FieldValue.serverTimestamp(),
       };
 
-      // Stock qty: store only if tracking stock
       if (trackStock) {
         updateData['stockQty'] = int.tryParse(stockQty.text.trim()) ?? 0;
       } else {
         updateData['stockQty'] = null;
       }
 
-      // Image fields
       if (uploaded != null) {
         if (uploaded["imageUrl"]!.isEmpty) {
-          // Switched to color (clear image)
           updateData['imageUrl'] = null;
           updateData['imagePublicId'] = null;
         } else {
-          // New image uploaded
           updateData['imageUrl'] = uploaded["imageUrl"];
           updateData['imagePublicId'] = uploaded["imagePublicId"];
         }
@@ -212,7 +216,9 @@ class _EditItemScreenState extends State<EditItemScreen> {
         title: const Text("Delete Item"),
         content: const Text("This action cannot be undone."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel")),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text("Delete", style: TextStyle(color: Colors.red)),
@@ -261,7 +267,9 @@ class _EditItemScreenState extends State<EditItemScreen> {
                 color: isSelected ? Colors.black : Colors.transparent,
               ),
             ),
-            child: isSelected ? const Icon(Icons.check, color: Colors.white) : null,
+            child: isSelected
+                ? const Icon(Icons.check, color: Colors.white)
+                : null,
           ),
         );
       }).toList(),
@@ -270,7 +278,8 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
   Widget _imageSection() {
     final hasPicked = _imageBytes != null;
-    final hasExisting = (_existingImageUrl != null && _existingImageUrl!.isNotEmpty);
+    final hasExisting =
+        (_existingImageUrl != null && _existingImageUrl!.isNotEmpty);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,6 +314,11 @@ class _EditItemScreenState extends State<EditItemScreen> {
             ),
           ],
         ),
+        if (kIsWeb)
+          const Text(
+            "Camera is disabled on web preview. Use Choose Photo.",
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
       ],
     );
   }
@@ -337,14 +351,16 @@ class _EditItemScreenState extends State<EditItemScreen> {
                 TextFormField(
                   controller: name,
                   decoration: const InputDecoration(labelText: "Name"),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? "Name is required" : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? "Name is required"
+                      : null,
                 ),
                 TextFormField(
                   controller: category,
                   decoration: const InputDecoration(labelText: "Category"),
                 ),
-                const SizedBox(height: 12),
 
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     const Text("Sold by"),
@@ -363,11 +379,24 @@ class _EditItemScreenState extends State<EditItemScreen> {
                   ],
                 ),
 
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: price,
-                  decoration: const InputDecoration(labelText: "Price"),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: "Selling Price"),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                 ),
+
+                // ✅ NEW COST FIELD
+                TextFormField(
+                  controller: cost,
+                  decoration: const InputDecoration(
+                    labelText: "Cost (Purchase Price)",
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+
                 TextFormField(
                   controller: barcode,
                   decoration: const InputDecoration(
@@ -385,14 +414,14 @@ class _EditItemScreenState extends State<EditItemScreen> {
                 if (trackStock)
                   TextFormField(
                     controller: stockQty,
-                    decoration: const InputDecoration(labelText: "Stock Quantity"),
+                    decoration:
+                        const InputDecoration(labelText: "Stock Quantity"),
                     keyboardType: TextInputType.number,
                   ),
 
                 const SizedBox(height: 16),
                 const Text("Representation"),
 
-                // ✅ Correct RadioGroup usage (wraps the Radio widgets)
                 RadioGroup<RepresentationType>(
                   groupValue: representation,
                   onChanged: (RepresentationType? v) {
@@ -407,10 +436,12 @@ class _EditItemScreenState extends State<EditItemScreen> {
                   },
                   child: const Row(
                     children: [
-                      Radio<RepresentationType>(value: RepresentationType.color),
+                      Radio<RepresentationType>(
+                          value: RepresentationType.color),
                       Text("Color"),
                       SizedBox(width: 16),
-                      Radio<RepresentationType>(value: RepresentationType.image),
+                      Radio<RepresentationType>(
+                          value: RepresentationType.image),
                       Text("Image"),
                     ],
                   ),
