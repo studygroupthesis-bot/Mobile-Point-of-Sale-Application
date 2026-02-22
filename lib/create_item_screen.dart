@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 enum SoldBy { each, weight }
+
 enum RepresentationType { color, image }
 
 class CreateItemScreen extends StatefulWidget {
@@ -61,8 +62,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception("Not logged in. Please login again.");
 
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
       throw Exception("Missing storeId in users/${user.uid}.");
@@ -118,6 +121,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       final itemData = <String, dynamic>{
         'name': _nameController.text.trim(),
+        'nameLower': _nameController.text.trim().toLowerCase(),
         'category': _categoryController.text.trim(),
         'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
         'price': price,
@@ -263,7 +267,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   ),
                   const SizedBox(width: 8),
                   TextButton.icon(
-                    onPressed: kIsWeb ? null : () => _pickImage(ImageSource.camera),
+                    onPressed:
+                        kIsWeb ? null : () => _pickImage(ImageSource.camera),
                     icon: const Icon(Icons.camera_alt),
                     label: const Text('Take Photo'),
                   ),
@@ -294,8 +299,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Name is required'
+                      : null,
                 ),
                 TextFormField(
                   controller: _categoryController,
@@ -309,8 +315,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   decoration: const InputDecoration(labelText: 'Price'),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Price is required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Price is required'
+                      : null,
                 ),
                 TextFormField(
                   controller: _barcodeController,
@@ -332,7 +339,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                 if (_trackStock)
                   TextFormField(
                     controller: _stockQtyController,
-                    decoration: const InputDecoration(labelText: 'Stock Quantity'),
+                    decoration:
+                        const InputDecoration(labelText: 'Stock Quantity'),
                     keyboardType: TextInputType.number,
                   ),
                 const SizedBox(height: 16),

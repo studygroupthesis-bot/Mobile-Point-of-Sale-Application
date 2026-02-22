@@ -152,6 +152,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
       final itemData = {
         'name': _nameController.text.trim(),
+        'nameLower': _nameController.text.trim().toLowerCase(),
         'category': _categoryController.text.trim(),
         'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
         'price': price,

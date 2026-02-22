@@ -2,6 +2,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'receipt_screen.dart';
+
+// ✅ MUST be TOP-LEVEL (not inside the State class)
+class StorePaymentConfig {
+  final String storeName;
+  final bool gcashEnabled;
+  final String gcashQrUrl;
+
+  const StorePaymentConfig({
+    required this.storeName,
+    required this.gcashEnabled,
+    required this.gcashQrUrl,
+  });
+
+  bool get gcashUsable => gcashEnabled && gcashQrUrl.trim().isNotEmpty;
+}
+
 class CartItem {
   final String itemId;
   final String name;
@@ -32,6 +49,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
   final List<CartItem> _cart = [];
 
   bool _loadingAdd = false;
+
+  // Live search suggestions
+  bool _loadingSuggest = false;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _suggestions = [];
+  String _lastQuery = '';
+
+  // ✅ checkout flag
+  bool _processingCheckout = false;
 
   @override
   void dispose() {
@@ -126,138 +151,103 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return qty;
   }
 
-  // ---------- Firestore item lookup ----------
-  Future<void> _addItemByBarcode(String barcode) async {
-    if (barcode.trim().isEmpty) return;
+  Future<void> _removeCartItem(int index) async {
+    final item = _cart[index];
 
-    setState(() => _loadingAdd = true);
-    try {
-      final storeId = await _requireStoreId();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove item?'),
+        content: Text('Remove "${item.name}" from the transaction?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
 
-      final q = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('items')
-          .where('barcode', isEqualTo: barcode.trim())
-          .limit(1)
-          .get();
+    if (confirm != true) return;
 
-      if (q.docs.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No item found for barcode: $barcode')),
-        );
-        return;
-      }
-
-      final doc = q.docs.first;
-      final data = doc.data();
-
-      final itemName = (data['name'] ?? '').toString();
-      final price = (data['price'] as num?)?.toDouble() ?? 0.0;
-      final itemBarcode = (data['barcode'] ?? '').toString();
-
-      final qty = await _askQuantity(itemName: itemName);
-      if (qty == null) return;
-
-      _addOrMergeCartItem(
-        itemId: doc.id,
-        name: itemName,
-        price: price,
-        qty: qty,
-        barcode: itemBarcode,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error adding item: $e")),
-      );
-    } finally {
-      if (mounted) setState(() => _loadingAdd = false);
-    }
+    setState(() {
+      _cart.removeAt(index);
+    });
   }
 
-  Future<void> _addItemByNameSearch(String nameQuery) async {
-    final query = nameQuery.trim();
-    if (query.isEmpty) return;
+  // ---------- Live suggestions ----------
+  Future<void> _fetchSuggestions(String input) async {
+    final q = input.trim().toLowerCase();
 
-    setState(() => _loadingAdd = true);
+    if (q.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _suggestions = [];
+        _loadingSuggest = false;
+        _lastQuery = '';
+      });
+      return;
+    }
+
+    if (q == _lastQuery) return;
+    _lastQuery = q;
+
+    setState(() => _loadingSuggest = true);
+
     try {
       final storeId = await _requireStoreId();
-
-      // Simple "starts with" search using nameLower.
-      // If you don't have nameLower yet, see NOTE below.
-      final lower = query.toLowerCase();
 
       final snap = await FirebaseFirestore.instance
           .collection('stores')
           .doc(storeId)
           .collection('items')
-          .where('nameLower', isGreaterThanOrEqualTo: lower)
-          .where('nameLower', isLessThan: '${lower}')
-          .limit(10)
+          .orderBy('nameLower')
+          .startAt([q])
+          .endAt(['$q\uf8ff'])
+          .limit(8)
           .get();
 
-      if (snap.docs.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No items found for: $query')),
-        );
-        return;
-      }
-
-      // Let user pick from results
-      final pickedDoc = await showModalBottomSheet<
-          QueryDocumentSnapshot<Map<String, dynamic>>>(
-        context: context,
-        showDragHandle: true,
-        builder: (ctx) => ListView(
-          children: [
-            const ListTile(
-              title: Text("Select item to add"),
-            ),
-            ...snap.docs.map((doc) {
-              final d = doc.data();
-              final n = (d['name'] ?? '').toString();
-              final p = (d['price'] as num?)?.toDouble() ?? 0.0;
-              return ListTile(
-                title: Text(n),
-                subtitle: Text('₱ ${p.toStringAsFixed(2)}'),
-                onTap: () => Navigator.pop(ctx, doc),
-              );
-            }),
-          ],
-        ),
-      );
-
-      if (pickedDoc == null) return;
-
-      final d = pickedDoc.data();
-      final itemName = (d['name'] ?? '').toString();
-      final price = (d['price'] as num?)?.toDouble() ?? 0.0;
-      final itemBarcode = (d['barcode'] ?? '').toString();
-
-      final qty = await _askQuantity(itemName: itemName);
-      if (qty == null) return;
-
-      _addOrMergeCartItem(
-        itemId: pickedDoc.id,
-        name: itemName,
-        price: price,
-        qty: qty,
-        barcode: itemBarcode,
-      );
-    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Search error: $e")),
-      );
-    } finally {
-      if (mounted) setState(() => _loadingAdd = false);
+      setState(() {
+        _suggestions = snap.docs;
+        _loadingSuggest = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingSuggest = false);
     }
   }
 
-  // ---------- UI actions ----------
+  Future<void> _addFromDoc(
+      QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
+    final d = doc.data();
+    final name = (d['name'] ?? '').toString();
+    final price = (d['price'] as num?)?.toDouble() ?? 0.0;
+    final barcode = (d['barcode'] ?? '').toString();
+
+    final qty = await _askQuantity(itemName: name);
+    if (qty == null) return;
+
+    _addOrMergeCartItem(
+      itemId: doc.id,
+      name: name,
+      price: price,
+      qty: qty,
+      barcode: barcode,
+    );
+
+    _searchController.clear();
+    setState(() {
+      _suggestions = [];
+      _lastQuery = '';
+    });
+  }
+
+  // ---------- Barcode manual input ----------
   Future<void> _openBarcodeInputDialog() async {
     final controller = TextEditingController();
 
@@ -289,7 +279,341 @@ class _TransactionScreenState extends State<TransactionScreen> {
     controller.dispose();
 
     if (code == null || code.trim().isEmpty) return;
-    await _addItemByBarcode(code);
+    await _addItemByBarcode(code.trim());
+  }
+
+  Future<void> _addItemByBarcode(String barcode) async {
+    setState(() => _loadingAdd = true);
+
+    try {
+      final storeId = await _requireStoreId();
+
+      final q = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .collection('items')
+          .where('barcode', isEqualTo: barcode)
+          .limit(1)
+          .get();
+
+      if (q.docs.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No item found for barcode: $barcode')),
+        );
+        return;
+      }
+
+      await _addFromDoc(q.docs.first);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error adding item: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingAdd = false);
+    }
+  }
+
+  // ===========================
+  // ✅ CHECKOUT + RECEIPT FLOW
+  // ===========================
+
+  Future<StorePaymentConfig> _fetchStorePaymentConfigSafe() async {
+    try {
+      final storeId = await _requireStoreId();
+      final storeDoc = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .get();
+
+      final data = storeDoc.data() ?? {};
+      final storeName = (data['name'] ?? 'Business Sale').toString();
+
+      final payment = (data['payment'] as Map<String, dynamic>?) ?? {};
+      final gcashEnabled = (payment['gcashEnabled'] as bool?) ?? false;
+      final gcashQrUrl = (payment['gcashQrUrl'] ?? '').toString();
+
+      return StorePaymentConfig(
+        storeName: storeName,
+        gcashEnabled: gcashEnabled,
+        gcashQrUrl: gcashQrUrl,
+      );
+    } catch (e) {
+      // ✅ fallback so bottom sheet STILL OPENS
+      debugPrint('Payment config load failed: $e');
+      return const StorePaymentConfig(
+        storeName: 'Business Sale',
+        gcashEnabled: false,
+        gcashQrUrl: '',
+      );
+    }
+  }
+
+  Future<void> _startCheckout() async {
+    debugPrint('TRANSACT tapped'); // ✅ see in debug console
+
+    if (_cart.isEmpty || _processingCheckout) return;
+
+    setState(() => _processingCheckout = true);
+
+    final config = await _fetchStorePaymentConfigSafe();
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Select Payment Method',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  leading: const Icon(Icons.payments),
+                  title: const Text('Cash'),
+                  subtitle: const Text('Confirm amount received'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _cashFlow(config);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.qr_code,
+                    color: config.gcashUsable ? null : Colors.black26,
+                  ),
+                  title: Text(
+                    'GCash',
+                    style: TextStyle(
+                      color: config.gcashUsable ? null : Colors.black26,
+                    ),
+                  ),
+                  subtitle: Text(
+                    config.gcashUsable
+                        ? 'Show store QR code'
+                        : 'Unavailable (disabled or QR not set)',
+                    style: TextStyle(
+                      color: config.gcashUsable ? null : Colors.black26,
+                    ),
+                  ),
+                  onTap: config.gcashUsable
+                      ? () async {
+                          Navigator.pop(ctx);
+                          await _gcashFlow(config);
+                        }
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (mounted) setState(() => _processingCheckout = false);
+  }
+
+  Future<void> _cashFlow(StorePaymentConfig config) async {
+    final controller = TextEditingController();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cash Payment'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Grand Total: ₱ ${grandTotal.toStringAsFixed(2)}'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Amount received',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) {
+      controller.dispose();
+      return;
+    }
+
+    final received = double.tryParse(controller.text.trim());
+    controller.dispose();
+
+    if (received == null || received < grandTotal) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Amount received must be >= Grand Total')),
+      );
+      return;
+    }
+
+    await _completeSale(
+      config: config,
+      paymentMode: 'Cash',
+      amountReceived: received,
+    );
+  }
+
+  Future<void> _gcashFlow(StorePaymentConfig config) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('GCash Payment'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Grand Total: ₱ ${grandTotal.toStringAsFixed(2)}'),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Image.network(
+                  config.gcashQrUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) {
+                    return const Center(child: Text('QR failed to load'));
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Let the customer scan the QR code, then confirm payment.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    await _completeSale(
+      config: config,
+      paymentMode: 'GCash',
+      amountReceived: grandTotal,
+    );
+  }
+
+  Future<void> _completeSale({
+    required StorePaymentConfig config,
+    required String paymentMode,
+    required double amountReceived,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('Not logged in.');
+
+    final storeId = await _requireStoreId();
+
+    final change = paymentMode.toLowerCase() == 'cash'
+        ? (amountReceived - grandTotal)
+        : 0.0;
+
+    final txRef = FirebaseFirestore.instance
+        .collection('stores')
+        .doc(storeId)
+        .collection('transactions')
+        .doc();
+
+    final now = DateTime.now();
+
+    await txRef.set({
+      'createdAt': FieldValue.serverTimestamp(),
+      'invoiceId': txRef.id,
+      'cashierUid': user.uid,
+      'paymentMode': paymentMode,
+      'subtotal': subtotal,
+      'tax': vat12,
+      'grandTotal': grandTotal,
+      'amountReceived': amountReceived,
+      'change': change,
+      'items': _cart.map((i) {
+        return {
+          'itemId': i.itemId,
+          'name': i.name,
+          'barcode': i.barcode,
+          'price': i.price,
+          'qty': i.qty,
+          'total': i.total,
+        };
+      }).toList(),
+    });
+
+    final receipt = ReceiptData(
+      invoiceId: txRef.id,
+      storeName: config.storeName,
+      dateTime: now,
+      paymentMode: paymentMode,
+      cashierUid: user.uid,
+      subtotal: subtotal,
+      tax: vat12,
+      grandTotal: grandTotal,
+      amountReceived: amountReceived,
+      change: change,
+      items: _cart
+          .map((c) => ReceiptLine(name: c.name, price: c.price, qty: c.qty))
+          .toList(),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _cart.clear();
+      _suggestions = [];
+      _lastQuery = '';
+      _searchController.clear();
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ReceiptScreen(data: receipt)),
+    );
   }
 
   // ---------- Build ----------
@@ -316,21 +640,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    _StoreLogoCircle(size: 36),
-                    SizedBox(width: 10),
-                    Expanded(child: _StoreNameOrAppTitle()),
-                  ],
-                ),
-                const SizedBox(height: 16),
                 const Text(
                   'Barcode Scanner',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
                 GestureDetector(
-                  onTap: _openBarcodeInputDialog, // ✅ tap to scan/enter barcode
+                  onTap: _openBarcodeInputDialog,
                   child: Container(
                     height: 90,
                     decoration: BoxDecoration(
@@ -365,6 +681,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     Expanded(
                       child: TextField(
                         controller: _searchController,
+                        onChanged: _fetchSuggestions,
                         decoration: InputDecoration(
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
@@ -389,19 +706,53 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           borderRadius: BorderRadius.circular(24),
                         ),
                       ),
-                      onPressed: _loadingAdd
-                          ? null
-                          : () => _addItemByNameSearch(_searchController.text),
-                      child: _loadingAdd
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Add Item'),
+                      onPressed: null,
+                      child: const Text('Add Item'),
                     ),
                   ],
                 ),
+                if (_loadingSuggest)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+                if (_suggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: _suggestions.map((doc) {
+                        final d = doc.data();
+                        final name = (d['name'] ?? '').toString();
+                        final price = (d['price'] as num?)?.toDouble() ?? 0.0;
+                        final barcode = (d['barcode'] ?? '').toString();
+
+                        return ListTile(
+                          dense: true,
+                          title: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '₱ ${price.toStringAsFixed(2)}'
+                            '${barcode.isNotEmpty ? ' • $barcode' : ''}',
+                          ),
+                          onTap: () => _addFromDoc(doc),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 const Text(
                   'Transaction',
@@ -429,14 +780,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           itemCount: _cart.length,
                           itemBuilder: (context, index) {
                             final item = _cart[index];
+
                             return Padding(
                               padding: const EdgeInsets.symmetric(
                                 vertical: 6,
                                 horizontal: 4,
                               ),
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   Expanded(
                                     child: Text(
@@ -445,6 +795,19 @@ class _TransactionScreenState extends State<TransactionScreen> {
                                     ),
                                   ),
                                   Text('₱ ${item.total.toStringAsFixed(2)}'),
+                                  const SizedBox(width: 6),
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(999),
+                                    onTap: () => _removeCartItem(index),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(4),
+                                      child: Icon(
+                                        Icons.close,
+                                        size: 18,
+                                        color: Colors.redAccent,
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             );
@@ -472,8 +835,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Grand Total',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Grand Total',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       Text(
                         '₱ ${grandTotal.toStringAsFixed(2)}',
                         style: const TextStyle(
@@ -495,18 +860,23 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    onPressed: _cart.isEmpty
-                        ? null
-                        : () {
-                            // TODO: Save transaction to Firestore (next step)
-                          },
-                    child: const Text(
-                      'TRANSACT',
-                      style: TextStyle(
-                        letterSpacing: 1,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    onPressed:
+                        (_cart.isEmpty || _loadingAdd || _processingCheckout)
+                            ? null
+                            : _startCheckout,
+                    child: _processingCheckout
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(
+                            'TRANSACT',
+                            style: TextStyle(
+                              letterSpacing: 1,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                 ),
               ],
@@ -516,119 +886,4 @@ class _TransactionScreenState extends State<TransactionScreen> {
       ),
     );
   }
-}
-
-/// ----- Keep your existing Store widgets (unchanged) -----
-
-class _StoreLogoCircle extends StatelessWidget {
-  final double size;
-  const _StoreLogoCircle({required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return _fallback();
-
-    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: userRef.snapshots(),
-      builder: (context, userSnap) {
-        final storeId = userSnap.data?.data()?['storeId'] as String?;
-        if (storeId == null || storeId.isEmpty) return _fallback();
-
-        final storeRef =
-            FirebaseFirestore.instance.collection('stores').doc(storeId);
-
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: storeRef.snapshots(),
-          builder: (context, storeSnap) {
-            final logoUrl = storeSnap.data?.data()?['logo_url'] as String?;
-
-            return Container(
-              width: size,
-              height: size,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color.fromARGB(255, 94, 223, 122),
-              ),
-              child: ClipOval(
-                child: (logoUrl != null && logoUrl.isNotEmpty)
-                    ? Image.network(
-                        logoUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _fallbackIcon(),
-                      )
-                    : _fallbackIcon(),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _fallback() {
-    return Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Color.fromARGB(255, 94, 223, 122),
-      ),
-      child: _fallbackIcon(),
-    );
-  }
-
-  Widget _fallbackIcon() {
-    return const Center(
-      child: Text(
-        '!',
-        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-}
-
-class _StoreNameOrAppTitle extends StatelessWidget {
-  const _StoreNameOrAppTitle();
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const Text('POP2Pay', style: _style);
-
-    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: userRef.snapshots(),
-      builder: (context, userSnap) {
-        final storeId = userSnap.data?.data()?['storeId'] as String?;
-        if (storeId == null || storeId.isEmpty) {
-          return const Text('POP2Pay', style: _style);
-        }
-
-        final storeRef =
-            FirebaseFirestore.instance.collection('stores').doc(storeId);
-
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: storeRef.snapshots(),
-          builder: (context, storeSnap) {
-            final name = storeSnap.data?.data()?['business_name'] as String?;
-            final display = (name != null && name.trim().isNotEmpty)
-                ? name.trim()
-                : 'POP2Pay';
-
-            return Text(display,
-                style: _style, overflow: TextOverflow.ellipsis);
-          },
-        );
-      },
-    );
-  }
-
-  static const TextStyle _style = TextStyle(
-    fontWeight: FontWeight.bold,
-    fontSize: 18,
-  );
 }
