@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import 'receipt_screen.dart';
 
-// ✅ MUST be TOP-LEVEL (not inside the State class)
 class StorePaymentConfig {
   final String storeName;
   final bool gcashEnabled;
@@ -45,6 +44,12 @@ class TransactionScreen extends StatefulWidget {
 }
 
 class _TransactionScreenState extends State<TransactionScreen> {
+  String _makeInvoiceNo(String docId){
+    final clean =docId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
+    if (clean.isEmpty) return 'D0000000';
+    final tail = clean.length>= 7 ? clean.substring(clean.length - 7): clean;
+    return 'D$tail';
+  }
   final _searchController = TextEditingController();
   final List<CartItem> _cart = [];
 
@@ -563,9 +568,20 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     final now = DateTime.now();
 
+    final invoiceNo = _makeInvoiceNo(txRef.id);
+
+
     await txRef.set({
+      //For Sales 
       'createdAt': FieldValue.serverTimestamp(),
       'invoiceId': txRef.id,
+      'invoiceNo': invoiceNo,
+      'invoiceNoLower': invoiceNo.toLowerCase(),
+      'paymentMethod' : paymentMode,
+      'total' : grandTotal,
+      'status':'Success',
+
+      // for receipts/reporting
       'cashierUid': user.uid,
       'paymentMode': paymentMode,
       'subtotal': subtotal,
@@ -573,6 +589,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       'grandTotal': grandTotal,
       'amountReceived': amountReceived,
       'change': change,
+      
       'items': _cart.map((i) {
         return {
           'itemId': i.itemId,
@@ -583,7 +600,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           'total': i.total,
         };
       }).toList(),
-    });
+    }); 
 
     final receipt = ReceiptData(
       invoiceId: txRef.id,

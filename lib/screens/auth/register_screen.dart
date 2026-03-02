@@ -22,7 +22,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool loading = false;
 
   Future<void> register() async {
-    // ✅ Validation order (clear for users)
     if (name.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Name is required")),
@@ -66,11 +65,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: password.text.trim(),
       );
 
-      // ✅ Create store + link owner user -> storeId
       await StoreService().createStoreForOwner(
         ownerUid: cred.user!.uid,
         email: email.text.trim(),
-        ownerName: name.text.trim(), // ✅ IMPORTANT: user name
+        ownerName: name.text.trim(),
         businessName: business.text.trim(),
       );
 
@@ -110,132 +108,165 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4F6),
       body: SafeArea(
-        bottom: false, // ✅ prevents bottom overflow
-        child: Column(
-          children: [
-            const SizedBox(height: 24),
+        top: true,
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final screenWidth = constraints.maxWidth;
+            final isSmallPhone = screenWidth < 360;
 
-            const Text(
-              "Register",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-            ),
+            final topSpacing = isSmallPhone ? 20.0 : 28.0;
+            final logoHeight = isSmallPhone ? 105.0 : 140.0;
+            final formHorizontalPadding = isSmallPhone ? 24.0 : 40.0;
+            final fieldGap = isSmallPhone ? 6.0 : 8.0;
+            final buttonWidth = isSmallPhone ? 130.0 : 146.0;
 
-            const SizedBox(height: 10),
-            Image.asset("assets/logo&name.png", height: 140),
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      SizedBox(height: topSpacing),
+                      const Text(
+                        "Register",
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: isSmallPhone ? 8 : 10),
+                      Image.asset(
+                        "assets/logo&name.png",
+                        height: logoHeight,
+                      ),
+                      SizedBox(height: isSmallPhone ? 14 : 18),
 
-            /// GREEN PANEL
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF055A5B),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(50),
-                    topRight: Radius.circular(50),
-                  ),
-                ),
-                padding: const EdgeInsets.fromLTRB(40, 28, 40, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _label("Name"),
-                    CustomTextField(
-                      controller: name,
-                      label: "Name",
-                      hintText: "Juan Dela Cruz",
-                      icon: Icons.person,
-                    ),
-
-                    const SizedBox(height: 8),
-                    _label("Email"),
-                    CustomTextField(
-                      controller: email,
-                      label: "Email",
-                      hintText: "example@gmail.com",
-                      icon: Icons.email,
-                    ),
-
-                    const SizedBox(height: 8),
-                    _label("Password"),
-                    CustomTextField(
-                      controller: password,
-                      label: "Password",
-                      hintText: "••••••••",
-                      icon: Icons.lock,
-                      isPassword: true,
-                    ),
-
-                    const SizedBox(height: 8),
-                    _label("Confirm Password"),
-                    CustomTextField(
-                      controller: confirm,
-                      label: "Confirm Password",
-                      hintText: "••••••••",
-                      icon: Icons.lock,
-                      isPassword: true,
-                    ),
-
-                    const SizedBox(height: 8),
-                    _label("Business Name"),
-                    CustomTextField(
-                      controller: business,
-                      label: "Business Name",
-                      hintText: "example business name",
-                      icon: Icons.business_center,
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    /// SMALL CENTER BUTTON
-                    Center(
-                      child: SizedBox(
-                        width: 146,
-                        height: 32,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF309E95),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF055A5B),
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(50),
+                              topRight: Radius.circular(50),
                             ),
-                            padding: EdgeInsets.zero,
                           ),
-                          onPressed: loading ? null : register,
-                          child: loading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Text(
-                                  "Register",
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black,
+                          padding: EdgeInsets.fromLTRB(
+                            formHorizontalPadding,
+                            isSmallPhone ? 22 : 28,
+                            formHorizontalPadding,
+                            MediaQuery.of(context).padding.bottom + 24,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _label("Name"),
+                              CustomTextField(
+                                controller: name,
+                                label: "Name",
+                                hintText: "Juan Dela Cruz",
+                                icon: Icons.person,
+                              ),
+
+                              SizedBox(height: fieldGap),
+                              _label("Email"),
+                              CustomTextField(
+                                controller: email,
+                                label: "Email",
+                                hintText: "example@gmail.com",
+                                icon: Icons.email,
+                              ),
+
+                              SizedBox(height: fieldGap),
+                              _label("Password"),
+                              CustomTextField(
+                                controller: password,
+                                label: "Password",
+                                hintText: "••••••••",
+                                icon: Icons.lock,
+                                isPassword: true,
+                              ),
+
+                              SizedBox(height: fieldGap),
+                              _label("Confirm Password"),
+                              CustomTextField(
+                                controller: confirm,
+                                label: "Confirm Password",
+                                hintText: "••••••••",
+                                icon: Icons.lock,
+                                isPassword: true,
+                              ),
+
+                              SizedBox(height: fieldGap),
+                              _label("Business Name"),
+                              CustomTextField(
+                                controller: business,
+                                label: "Business Name",
+                                hintText: "example business name",
+                                icon: Icons.business_center,
+                              ),
+
+                              SizedBox(height: isSmallPhone ? 12 : 14),
+
+                              Center(
+                                child: SizedBox(
+                                  width: buttonWidth,
+                                  height: 32,
+                                  child: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF309E95),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(15),
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                    ),
+                                    onPressed: loading ? null : register,
+                                    child: loading
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Text(
+                                            "Register",
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.black,
+                                            ),
+                                          ),
                                   ),
                                 ),
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              Center(
+                                child: GestureDetector(
+                                  onTap: () => Navigator.pop(context),
+                                  child: const Text(
+                                    "Already have an account? Login here!",
+                                    style: TextStyle(color: Colors.white),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+
+                              const Spacer(),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    Center(
-                      child: GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: const Text(
-                          "Already have an account? Login here!",
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
