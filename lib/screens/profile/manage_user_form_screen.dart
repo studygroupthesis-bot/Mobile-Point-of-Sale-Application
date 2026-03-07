@@ -29,6 +29,13 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   bool _saving = false;
   bool _initialized = false;
 
+  // Permissions
+  bool _inventoryAccess = true;
+  bool _salesAccess = true;
+  bool _transactionHistoryAccess = true;
+  bool _receiptAccess = true;
+  bool _profileAccess = true;
+
   bool get isEdit => widget.memberUid != null;
 
   @override
@@ -50,11 +57,42 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
         .snapshots();
   }
 
+  void _loadPermissions(Map<String, dynamic> data) {
+    final perms = (data['permissions'] as Map<String, dynamic>?) ?? {};
+
+    _inventoryAccess = perms['inventoryAccess'] ?? true;
+    _salesAccess = perms['salesAccess'] ?? true;
+    _transactionHistoryAccess = perms['transactionHistoryAccess'] ?? true;
+    _receiptAccess = perms['receiptAccess'] ?? true;
+    _profileAccess = perms['profileAccess'] ?? true;
+  }
+
+  Map<String, dynamic> _buildPermissions() {
+    if (_role == 'admin') {
+      return {
+        'inventoryAccess': true,
+        'salesAccess': true,
+        'transactionHistoryAccess': true,
+        'receiptAccess': true,
+        'profileAccess': true,
+      };
+    }
+
+    return {
+      'inventoryAccess': _inventoryAccess,
+      'salesAccess': _salesAccess,
+      'transactionHistoryAccess': _transactionHistoryAccess,
+      'receiptAccess': _receiptAccess,
+      'profileAccess': _profileAccess,
+    };
+  }
+
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
     final pass = _passCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
+    final permissions = _buildPermissions();
 
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -63,7 +101,15 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
       return;
     }
 
+    if (email.isEmpty || pass.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email and Password are required')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
+
     try {
       if (isEdit) {
         await _svc.updateMember(
@@ -72,6 +118,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           name: name,
           phone: phone,
           role: _role,
+          permissions: permissions,
         );
       } else {
         if (email.isEmpty || pass.isEmpty) {
@@ -88,6 +135,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           password: pass,
           phone: phone,
           role: _role,
+          permissions: permissions,
         );
       }
 
@@ -132,7 +180,10 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
 
     setState(() => _saving = true);
     try {
-      await _svc.deleteMember(storeId: widget.storeId, uid: widget.memberUid!);
+      await _svc.deleteMember(
+        storeId: widget.storeId,
+        uid: widget.memberUid!,
+      );
       if (!mounted) return;
       Navigator.pop(context);
     } finally {
@@ -148,8 +199,10 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: const BackButton(color: Colors.black),
-        title: Text(isEdit ? 'Edit User' : 'Add User',
-            style: const TextStyle(color: Colors.black)),
+        title: Text(
+          isEdit ? 'Edit User' : 'Add User',
+          style: const TextStyle(color: Colors.black),
+        ),
         centerTitle: true,
         actions: [
           if (isEdit)
@@ -172,13 +225,16 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
                   stream: _memberStream(),
                   builder: (context, snap) {
                     final data = snap.data?.data() ?? {};
+
                     if (!_initialized && snap.hasData) {
                       _nameCtrl.text = (data['name'] as String?) ?? '';
                       _emailCtrl.text = (data['email'] as String?) ?? '';
                       _phoneCtrl.text = (data['phone'] as String?) ?? '';
                       _role = (data['role'] as String?) ?? 'staff';
+                      _loadPermissions(data);
                       _initialized = true;
                     }
+
                     return _form(context, lockEmail: true);
                   },
                 )
@@ -189,51 +245,148 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   }
 
   Widget _form(BuildContext context, {required bool lockEmail}) {
-    return Column(
-      children: [
-        // No profile photo header (as requested)
-        _field('Name', _nameCtrl, enabled: !_saving),
-        _field('Email Address', _emailCtrl,
-            enabled: !lockEmail && !_saving, lockIcon: lockEmail),
-        if (!isEdit)
-          _field('Password', _passCtrl, enabled: !_saving, obscure: true),
-        _field('Phone Number', _phoneCtrl,
-            enabled: !_saving, keyboardType: TextInputType.phone),
-
-        const SizedBox(height: 8),
-
-        DropdownButtonFormField<String>(
-          initialValue: _role,
-          decoration: InputDecoration(
-            labelText: 'Role',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _field('Name', _nameCtrl, enabled: !_saving),
+          _field(
+            'Email Address',
+            _emailCtrl,
+            enabled: !lockEmail && !_saving,
+            lockIcon: lockEmail,
           ),
-          items: const [
-            DropdownMenuItem(value: 'admin', child: Text('Admin')),
-            DropdownMenuItem(value: 'staff', child: Text('Staff')),
-          ],
-          onChanged:
-              _saving ? null : (v) => setState(() => _role = v ?? 'staff'),
-        ),
+          if (!isEdit)
+            _field(
+              'Password',
+              _passCtrl,
+              enabled: !_saving,
+              obscure: true,
+            ),
+          _field(
+            'Phone Number',
+            _phoneCtrl,
+            enabled: !_saving,
+            keyboardType: TextInputType.phone,
+          ),
 
-        const Spacer(),
+          const SizedBox(height: 8),
 
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2AA39A),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
+          DropdownButtonFormField<String>(
+            key: ValueKey(_role),
+            initialValue: _role,
+            decoration: InputDecoration(
+              labelText: 'Role',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: _saving ? null : _save,
-            child: Text(_saving ? 'SAVING...' : 'SAVE CHANGES',
-                style: const TextStyle(color: Colors.white)),
+            items: const [
+              DropdownMenuItem(value: 'admin', child: Text('Admin')),
+              DropdownMenuItem(value: 'staff', child: Text('Staff')),
+            ],
+            onChanged: _saving
+                ? null
+                : (v) {
+                    setState(() {
+                      _role = v ?? 'staff';
+                    });
+                  },
           ),
-        ),
-      ],
+
+          const SizedBox(height: 16),
+
+          if (_role == 'staff') ...[
+            const Text(
+              'Permissions',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _permTile(
+              title: 'Inventory Access',
+              value: _inventoryAccess,
+              onChanged: (v) => setState(() => _inventoryAccess = v),
+            ),
+            _permTile(
+              title: 'Sales / Add to Cart',
+              value: _salesAccess,
+              onChanged: (v) => setState(() => _salesAccess = v),
+            ),
+            _permTile(
+              title: 'Transaction History',
+              value: _transactionHistoryAccess,
+              onChanged: (v) => setState(() => _transactionHistoryAccess = v),
+            ),
+            _permTile(
+              title: 'Receipt Access',
+              value: _receiptAccess,
+              onChanged: (v) => setState(() => _receiptAccess = v),
+            ),
+            _permTile(
+              title: 'Profile Access',
+              value: _profileAccess,
+              onChanged: (v) => setState(() => _profileAccess = v),
+            ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'Admin has full access to all features.',
+                style: TextStyle(color: Colors.black54),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2AA39A),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25),
+                ),
+              ),
+              onPressed: _saving ? null : _save,
+              child: Text(
+                _saving ? 'SAVING...' : 'SAVE CHANGES',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _permTile({
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: CheckboxListTile(
+        value: value,
+        onChanged: _saving ? null : (v) => onChanged(v ?? false),
+        title: Text(title),
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
     );
   }
 
@@ -257,7 +410,9 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           suffixIcon: lockIcon
               ? const Icon(Icons.lock)
               : (enabled ? const Icon(Icons.edit) : null),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );

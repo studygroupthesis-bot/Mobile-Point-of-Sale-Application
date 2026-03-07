@@ -1,3 +1,4 @@
 {
-    "vscode-pets.theme": "beach"
+    "vscode-pets.theme": "beach",
+    "cmake.ignoreCMakeListsMissing": true
 }

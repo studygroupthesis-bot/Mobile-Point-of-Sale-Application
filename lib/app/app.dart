@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:device_preview/device_preview.dart';
 
 import '../screens/dashboard/dashboard_screen.dart';
-import '../screens/sales/sales_screen.dart';
+import '../screens/sales/transaction_history.dart';
 import '../screens/transaction/transaction_screen.dart';
 import '../screens/inventory/inventory_screen.dart';
 import '../screens/profile/profile_screen.dart';
@@ -21,7 +21,7 @@ class _PopPayAppState extends State<PopPayApp> {
 
   final List<Widget> screens = const [
     DashboardScreen(), // 0
-    SalesScreen(), // 1
+    TransactionHistory(), // 1
     TransactionScreen(), // 2
     InventoryScreen(), // 3
     ProfileScreen(), // 4

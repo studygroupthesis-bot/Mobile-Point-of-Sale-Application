@@ -33,6 +33,7 @@ class StoreMembersService {
     required String password,
     required String phone,
     required String role, // "staff" or "admin"
+    required Map<String, dynamic> permissions, 
   }) async {
     // Create / reuse secondary Firebase app
     FirebaseApp secondary;
@@ -68,6 +69,8 @@ class StoreMembersService {
       'email': email.trim(),
       'phone': phone.trim(),
       'role': role,
+      'permissions':permissions,
+      'isActive': true, 
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
@@ -84,6 +87,8 @@ class StoreMembersService {
       'email': email.trim(),
       'phone': phone.trim(),
       'role': role,
+      'permissions': permissions,
+      'isActive': true, 
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
@@ -95,6 +100,7 @@ class StoreMembersService {
     required String name,
     required String phone,
     required String role,
+    required Map<String, dynamic> permissions, 
   }) async {
     final now = FieldValue.serverTimestamp();
 
@@ -108,6 +114,7 @@ class StoreMembersService {
       'name': name.trim(),
       'phone': phone.trim(),
       'role': role,
+      'permissions': permissions, 
       'updated_at': now,
     }, SetOptions(merge: true));
 
@@ -116,6 +123,7 @@ class StoreMembersService {
       'name': name.trim(),
       'phone': phone.trim(),
       'role': role,
+      'permissions': permissions,
       'updated_at': now,
     }, SetOptions(merge: true));
   }
