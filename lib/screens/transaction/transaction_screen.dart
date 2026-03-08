@@ -44,24 +44,15 @@ class TransactionScreen extends StatefulWidget {
 }
 
 class _TransactionScreenState extends State<TransactionScreen> {
-  String _makeInvoiceNo(String docId){
-    final clean =docId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
-    if (clean.isEmpty) return 'D0000000';
-    final tail = clean.length>= 7 ? clean.substring(clean.length - 7): clean;
-    return 'D$tail';
-  }
   final _searchController = TextEditingController();
   final List<CartItem> _cart = [];
 
   bool _loadingAdd = false;
-
-  // Live search suggestions
   bool _loadingSuggest = false;
+  bool _processingCheckout = false;
+
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _suggestions = [];
   String _lastQuery = '';
-
-  // ✅ checkout flag
-  bool _processingCheckout = false;
 
   @override
   void dispose() {
@@ -69,10 +60,23 @@ class _TransactionScreenState extends State<TransactionScreen> {
     super.dispose();
   }
 
-  // ---------- Helpers ----------
+  String _makeInvoiceNo(String docId) {
+    final clean = docId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
+    if (clean.isEmpty) return 'D0000000';
+    final tail = clean.length >= 7 ? clean.substring(clean.length - 7) : clean;
+    return 'D$tail';
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
+  }
+
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception("Not logged in.");
+    if (user == null) throw Exception('Not logged in.');
 
     final snap = await FirebaseFirestore.instance
         .collection('users')
@@ -81,7 +85,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
-      throw Exception("Missing storeId in users/${user.uid}.");
+      throw Exception('Missing storeId in users/${user.uid}.');
     }
     return storeId;
   }
@@ -98,38 +102,41 @@ class _TransactionScreenState extends State<TransactionScreen> {
     String? barcode,
   }) {
     final idx = _cart.indexWhere((e) => e.itemId == itemId);
+
     setState(() {
       if (idx >= 0) {
         _cart[idx].qty += qty;
       } else {
-        _cart.add(CartItem(
-          itemId: itemId,
-          name: name,
-          price: price,
-          qty: qty,
-          barcode: barcode,
-        ));
+        _cart.add(
+          CartItem(
+            itemId: itemId,
+            name: name,
+            price: price,
+            qty: qty,
+            barcode: barcode,
+          ),
+        );
       }
     });
   }
 
   Future<int?> _askQuantity({required String itemName}) async {
-    final controller = TextEditingController(text: "1");
+    final controller = TextEditingController(text: '1');
 
     final qty = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Quantity"),
+        title: const Text('Quantity'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("Add quantity for:\n$itemName"),
+            Text('Add quantity for:\n$itemName'),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: "Quantity",
+                labelText: 'Quantity',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -138,7 +145,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () {
@@ -146,7 +153,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
               if (q == null || q <= 0) return;
               Navigator.pop(ctx, q);
             },
-            child: const Text("Add"),
+            child: const Text('Add'),
           ),
         ],
       ),
@@ -184,7 +191,6 @@ class _TransactionScreenState extends State<TransactionScreen> {
     });
   }
 
-  // ---------- Live suggestions ----------
   Future<void> _fetchSuggestions(String input) async {
     final q = input.trim().toLowerCase();
 
@@ -221,14 +227,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
         _suggestions = snap.docs;
         _loadingSuggest = false;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('SUGGEST ERROR: $e');
       if (!mounted) return;
       setState(() => _loadingSuggest = false);
     }
   }
 
   Future<void> _addFromDoc(
-      QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
     final d = doc.data();
     final name = (d['name'] ?? '').toString();
     final price = (d['price'] as num?)?.toDouble() ?? 0.0;
@@ -252,30 +260,29 @@ class _TransactionScreenState extends State<TransactionScreen> {
     });
   }
 
-  // ---------- Barcode manual input ----------
   Future<void> _openBarcodeInputDialog() async {
     final controller = TextEditingController();
 
     final code = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Scan / Enter Barcode"),
+        title: const Text('Scan / Enter Barcode'),
         content: TextField(
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(
-            labelText: "Barcode",
+            labelText: 'Barcode',
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text("Add"),
+            child: const Text('Add'),
           ),
         ],
       ),
@@ -311,18 +318,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       await _addFromDoc(q.docs.first);
     } catch (e) {
+      debugPrint('BARCODE ERROR: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error adding item: $e")),
+        SnackBar(content: Text('Error adding item: $e')),
       );
     } finally {
       if (mounted) setState(() => _loadingAdd = false);
     }
   }
-
-  // ===========================
-  // ✅ CHECKOUT + RECEIPT FLOW
-  // ===========================
 
   Future<StorePaymentConfig> _fetchStorePaymentConfigSafe() async {
     try {
@@ -333,11 +337,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
           .get();
 
       final data = storeDoc.data() ?? {};
-      final storeName = (data['name'] ?? 'Business Sale').toString();
+
+      final storeName =
+          (data['business_name'] ?? data['name'] ?? 'Business Sale').toString();
 
       final payment = (data['payment'] as Map<String, dynamic>?) ?? {};
-      final gcashEnabled = (payment['gcashEnabled'] as bool?) ?? false;
-      final gcashQrUrl = (payment['gcashQrUrl'] ?? '').toString();
+      final gcashEnabled = (data['accept_gcash'] as bool?) ??
+          (payment['gcashEnabled'] as bool?) ??
+          false;
+      final gcashQrUrl =
+          (data['gcashQrUrl'] ?? payment['gcashQrUrl'] ?? '').toString();
 
       return StorePaymentConfig(
         storeName: storeName,
@@ -345,8 +354,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         gcashQrUrl: gcashQrUrl,
       );
     } catch (e) {
-      // ✅ fallback so bottom sheet STILL OPENS
-      debugPrint('Payment config load failed: $e');
+      debugPrint('PAYMENT CONFIG ERROR: $e');
       return const StorePaymentConfig(
         storeName: 'Business Sale',
         gcashEnabled: false,
@@ -356,8 +364,6 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Future<void> _startCheckout() async {
-    debugPrint('TRANSACT tapped'); // ✅ see in debug console
-
     if (_cart.isEmpty || _processingCheckout) return;
 
     setState(() => _processingCheckout = true);
@@ -433,7 +439,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       },
     );
 
-    if (mounted) setState(() => _processingCheckout = false);
+    if (mounted) {
+      setState(() => _processingCheckout = false);
+    }
   }
 
   Future<void> _cashFlow(StorePaymentConfig config) async {
@@ -450,7 +458,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
             const SizedBox(height: 10),
             TextField(
               controller: controller,
-              keyboardType: TextInputType.number,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Amount received',
                 border: OutlineInputBorder(),
@@ -482,7 +491,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
     if (received == null || received < grandTotal) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Amount received must be >= Grand Total')),
+        const SnackBar(
+          content:
+              Text('Amount received must be greater than or equal to total.'),
+        ),
       );
       return;
     }
@@ -552,88 +564,223 @@ class _TransactionScreenState extends State<TransactionScreen> {
     required double amountReceived,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('Not logged in.');
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not logged in.')),
+      );
+      return;
+    }
 
-    final storeId = await _requireStoreId();
+    try {
+      final storeId = await _requireStoreId();
 
-    final change = paymentMode.toLowerCase() == 'cash'
-        ? (amountReceived - grandTotal)
-        : 0.0;
+      final change = paymentMode.toLowerCase() == 'cash'
+          ? (amountReceived - grandTotal)
+          : 0.0;
 
-    final txRef = FirebaseFirestore.instance
-        .collection('stores')
-        .doc(storeId)
-        .collection('transactions')
-        .doc();
+      final firestore = FirebaseFirestore.instance;
+      final txRef = firestore
+          .collection('stores')
+          .doc(storeId)
+          .collection('transactions')
+          .doc();
 
-    final now = DateTime.now();
+      final now = DateTime.now();
+      final invoiceNo = _makeInvoiceNo(txRef.id);
 
-    final invoiceNo = _makeInvoiceNo(txRef.id);
+      debugPrint('================ CHECKOUT START ================');
+      debugPrint('STORE ID: $storeId');
+      debugPrint('USER UID: ${user.uid}');
+      debugPrint('PAYMENT MODE: $paymentMode');
+      debugPrint('SUBTOTAL: $subtotal');
+      debugPrint('TAX: $vat12');
+      debugPrint('GRAND TOTAL: $grandTotal');
+      debugPrint('TX REF: ${txRef.path}');
+      debugPrint('CART COUNT: ${_cart.length}');
 
+      await firestore.runTransaction((transaction) async {
+        try {
+          final itemRefs = <String, DocumentReference<Map<String, dynamic>>>{};
+          final currentStocks = <String, int>{};
 
-    await txRef.set({
-      //For Sales 
-      'createdAt': FieldValue.serverTimestamp(),
-      'invoiceId': txRef.id,
-      'invoiceNo': invoiceNo,
-      'invoiceNoLower': invoiceNo.toLowerCase(),
-      'paymentMethod' : paymentMode,
-      'total' : grandTotal,
-      'status':'Success',
+          // READS FIRST
+          for (final cartItem in _cart) {
+            final itemRef = firestore
+                .collection('stores')
+                .doc(storeId)
+                .collection('items')
+                .doc(cartItem.itemId);
 
-      // for receipts/reporting
-      'cashierUid': user.uid,
-      'paymentMode': paymentMode,
-      'subtotal': subtotal,
-      'tax': vat12,
-      'grandTotal': grandTotal,
-      'amountReceived': amountReceived,
-      'change': change,
-      
-      'items': _cart.map((i) {
-        return {
-          'itemId': i.itemId,
-          'name': i.name,
-          'barcode': i.barcode,
-          'price': i.price,
-          'qty': i.qty,
-          'total': i.total,
-        };
-      }).toList(),
-    }); 
+            debugPrint('READ ITEM: ${cartItem.itemId} / ${cartItem.name}');
+            final itemSnap = await transaction.get(itemRef);
+            debugPrint('ITEM EXISTS: ${itemSnap.exists}');
 
-    final receipt = ReceiptData(
-      invoiceId: txRef.id,
-      storeName: config.storeName,
-      dateTime: now,
-      paymentMode: paymentMode,
-      cashierUid: user.uid,
-      subtotal: subtotal,
-      tax: vat12,
-      grandTotal: grandTotal,
-      amountReceived: amountReceived,
-      change: change,
-      items: _cart
-          .map((c) => ReceiptLine(name: c.name, price: c.price, qty: c.qty))
-          .toList(),
-    );
+            if (!itemSnap.exists) {
+              throw Exception('Item "${cartItem.name}" no longer exists.');
+            }
 
-    if (!mounted) return;
+            final data = itemSnap.data() as Map<String, dynamic>? ?? {};
+            debugPrint('RAW ITEM DATA: $data');
 
-    setState(() {
-      _cart.clear();
-      _suggestions = [];
-      _lastQuery = '';
-      _searchController.clear();
-    });
+            final currentStock = _safeToInt(data['stockQty']);
+            debugPrint('CURRENT STOCK: $currentStock');
+            debugPrint('REQUESTED QTY: ${cartItem.qty}');
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ReceiptScreen(data: receipt)),
-    );
+            if (currentStock < cartItem.qty) {
+              throw Exception(
+                'Not enough stock for "${cartItem.name}". '
+                'Available: $currentStock, Requested: ${cartItem.qty}',
+              );
+            }
+
+            itemRefs[cartItem.itemId] = itemRef;
+            currentStocks[cartItem.itemId] = currentStock;
+          }
+
+          debugPrint('ALL READS DONE');
+
+          // WRITE TRANSACTION
+          debugPrint('SETTING TRANSACTION DOC...');
+          transaction.set(txRef, {
+            'createdAt': FieldValue.serverTimestamp(),
+            'createdAtLocal': now.toIso8601String(),
+            'invoiceId': txRef.id,
+            'invoiceNo': invoiceNo,
+            'invoiceNoLower': invoiceNo.toLowerCase(),
+            'storeId': storeId,
+            'storeName': config.storeName,
+            'paymentMethod': paymentMode,
+            'paymentMode': paymentMode,
+            'total': grandTotal,
+            'status': 'Success',
+            'cashierUid': user.uid,
+            'subtotal': subtotal,
+            'tax': vat12,
+            'grandTotal': grandTotal,
+            'amountReceived': amountReceived,
+            'change': change,
+            'items': _cart.map((i) {
+              return {
+                'itemId': i.itemId,
+                'name': i.name,
+                'barcode': i.barcode,
+                'price': i.price,
+                'qty': i.qty,
+                'total': i.total,
+              };
+            }).toList(),
+          });
+
+          // WRITE STOCK UPDATES + LOGS
+          for (final cartItem in _cart) {
+            final itemRef = itemRefs[cartItem.itemId]!;
+            final currentStock = currentStocks[cartItem.itemId]!;
+            final newStock = currentStock - cartItem.qty;
+
+            debugPrint(
+              'UPDATING ITEM ${cartItem.itemId}: $currentStock -> $newStock',
+            );
+
+            transaction.update(itemRef, {
+              'stockQty': newStock,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+
+            final stockLogRef = firestore
+                .collection('stores')
+                .doc(storeId)
+                .collection('stock_logs')
+                .doc();
+
+            debugPrint('CREATING STOCK LOG: ${stockLogRef.path}');
+
+            transaction.set(stockLogRef, {
+              'createdAt': FieldValue.serverTimestamp(),
+              'itemId': cartItem.itemId,
+              'itemName': cartItem.name,
+              'barcode': cartItem.barcode,
+              'type': 'stock_out',
+              'reason': 'sale',
+              'qty': cartItem.qty,
+              'beforeQty': currentStock,
+              'afterQty': newStock,
+              'referenceId': txRef.id,
+              'referenceType': 'transaction',
+              'invoiceNo': invoiceNo,
+              'cashierUid': user.uid,
+            });
+          }
+
+          debugPrint('TX BODY FINISHED');
+        } catch (e, st) {
+          debugPrint('INNER TX ERROR: $e');
+          debugPrint('INNER TX STACK: $st');
+          rethrow;
+        }
+      });
+
+      debugPrint('RUN TRANSACTION SUCCESS');
+
+      final receipt = ReceiptData(
+        invoiceId: txRef.id,
+        invoiceNo: invoiceNo,
+        storeName: config.storeName,
+        dateTime: now,
+        paymentMode: paymentMode,
+        cashierUid: user.uid,
+        subtotal: subtotal,
+        tax: vat12,
+        grandTotal: grandTotal,
+        amountReceived: amountReceived,
+        change: change,
+        items: _cart
+            .map((c) => ReceiptLine(name: c.name, price: c.price, qty: c.qty))
+            .toList(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _cart.clear();
+        _suggestions = [];
+        _lastQuery = '';
+        _searchController.clear();
+      });
+
+      await Future.delayed(const Duration(milliseconds: 120));
+
+      if (!mounted) return;
+
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ReceiptScreen(data: receipt),
+        ),
+      );
+
+      debugPrint('================ CHECKOUT END ================');
+    } on FirebaseException catch (e, st) {
+      debugPrint('FIREBASE ERROR CODE: ${e.code}');
+      debugPrint('FIREBASE ERROR MESSAGE: ${e.message}');
+      debugPrint('FIREBASE ERROR: $e');
+      debugPrint('FIREBASE STACK: $st');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checkout failed: ${e.message ?? e.code}')),
+      );
+    } catch (e, st) {
+      debugPrint('CHECKOUT ERROR TYPE: ${e.runtimeType}');
+      debugPrint('CHECKOUT ERROR: $e');
+      debugPrint('CHECKOUT STACK: $st');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checkout failed: $e')),
+      );
+    }
   }
 
-  // ---------- Build ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -659,7 +806,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
               children: [
                 const Text(
                   'Barcode Scanner',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 GestureDetector(
@@ -773,7 +923,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 const SizedBox(height: 16),
                 const Text(
                   'Transaction',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -788,8 +941,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       ? const Center(
                           child: Text(
                             'No items scanned yet',
-                            style:
-                                TextStyle(fontSize: 13, color: Colors.black54),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.black54,
+                            ),
                           ),
                         )
                       : ListView.builder(
