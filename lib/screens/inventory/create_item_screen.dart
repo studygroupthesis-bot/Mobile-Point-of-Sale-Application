@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/cloudinary_service.dart';
 
 enum SoldBy { each, weight }
-
 enum RepresentationType { color, image }
 
 class CreateItemScreen extends StatefulWidget {
@@ -23,39 +22,53 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   final _formKey = GlobalKey<FormState>();
 
   final _nameController = TextEditingController();
-  final _categoryController = TextEditingController();
   final _priceController = TextEditingController();
-  final _costController = TextEditingController(); // ✅ NEW
+  final _costController = TextEditingController();
   final _barcodeController = TextEditingController();
   final _stockQtyController = TextEditingController();
 
-  SoldBy _soldBy = SoldBy.each;
-  bool _trackStock = false;
+  final List<String> _categories = [
+    'Beverages',
+    'Snacks',
+    'Pantry Supplies',
+    'Personal Care',
+    'Home Care',
+    'Pharmacies',
+  ];
 
-  RepresentationType _representationType = RepresentationType.color;
-  Color _selectedColor = Colors.green;
+  final List<Color> _availableColors = const [
+    Colors.black,
+    Colors.black54,
+    Colors.grey,
+    Colors.deepOrange,
+    Colors.orange,
+    Colors.amber,
+    Colors.green,
+    Colors.blue,
+    Colors.deepPurpleAccent,
+    Color(0xFFF8C7C7),
+    Color(0xFFE2D3FF),
+    Colors.white,
+  ];
+
+  String? _selectedCategory;
+  SoldBy _soldBy = SoldBy.each;
+
+  RepresentationType _representationType = RepresentationType.image;
+  Color _selectedColor = const Color(0xFFD9D9D9);
 
   XFile? _pickedImage;
   Uint8List? _imageBytes;
 
   bool _isSaving = false;
 
-  final List<Color> _availableColors = const [
-    Colors.grey,
-    Colors.red,
-    Colors.orange,
-    Colors.yellow,
-    Colors.green,
-    Colors.blue,
-    Colors.pink,
-  ];
+  static const String _gradientAsset = 'assets/Gradient.png';
 
   @override
   void dispose() {
     _nameController.dispose();
-    _categoryController.dispose();
     _priceController.dispose();
-    _costController.dispose(); // ✅ NEW
+    _costController.dispose();
     _barcodeController.dispose();
     _stockQtyController.dispose();
     super.dispose();
@@ -64,18 +77,16 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      throw Exception("Not logged in. Please login again.");
+      throw Exception('Not logged in. Please login again.');
     }
 
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final snap =
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
       throw Exception(
-        "Missing storeId in users/${user.uid}. Add storeId to the user profile.",
+        'Missing storeId in users/${user.uid}. Add storeId to the user profile.',
       );
     }
     return storeId;
@@ -88,6 +99,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     final bytes = await picked.readAsBytes();
     setState(() {
+      _representationType = RepresentationType.image;
       _pickedImage = picked;
       _imageBytes = bytes;
     });
@@ -105,14 +117,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       filename: _pickedImage!.name,
     );
 
-    final imageUrl = res["secure_url"] as String?;
-    final publicId = res["public_id"] as String?;
+    final imageUrl = res['secure_url'] as String?;
+    final publicId = res['public_id'] as String?;
 
     if (imageUrl == null || publicId == null) {
-      throw Exception("Cloudinary response missing secure_url or public_id.");
+      throw Exception('Cloudinary response missing secure_url or public_id.');
     }
 
-    return {"imageUrl": imageUrl, "imagePublicId": publicId};
+    return {
+      'imageUrl': imageUrl,
+      'imagePublicId': publicId,
+    };
   }
 
   String? _validateRequired(String? value, String field) {
@@ -137,29 +152,23 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       final storeId = await _requireStoreId();
 
       final price = double.tryParse(_priceController.text.trim()) ?? 0;
-      final cost = double.tryParse(_costController.text.trim()) ?? 0; // ✅ NEW
-
-      final stockQty = int.tryParse(
-            _stockQtyController.text.trim().isEmpty
-                ? '0'
-                : _stockQtyController.text.trim(),
-          ) ??
-          0;
+      final cost = double.tryParse(_costController.text.trim()) ?? 0;
+      final stockQty = int.tryParse(_stockQtyController.text.trim()) ?? 0;
 
       final upload = await _uploadImageIfNeeded();
-      final imageUrl = upload?["imageUrl"];
-      final imagePublicId = upload?["imagePublicId"];
+      final imageUrl = upload?['imageUrl'];
+      final imagePublicId = upload?['imagePublicId'];
 
       final itemData = {
         'name': _nameController.text.trim(),
         'nameLower': _nameController.text.trim().toLowerCase(),
-        'category': _categoryController.text.trim(),
+        'category': _selectedCategory ?? '',
         'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
         'price': price,
-        'cost': cost, // ✅ NEW
+        'cost': cost,
         'barcode': _barcodeController.text.trim(),
-        'trackStock': _trackStock,
-        'stockQty': _trackStock ? stockQty : null,
+        'trackStock': true,
+        'stockQty': stockQty,
         'representationType':
             _representationType == RepresentationType.color ? 'color' : 'image',
         'colorValue': _representationType == RepresentationType.color
@@ -194,223 +203,556 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     }
   }
 
+  void _showRepresentationOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2EEEE),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Colors'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showColorOptions();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.image_outlined),
+                  title: const Text('Image'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showImageOptions();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showColorOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2EEEE),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: _availableColors.map((color) {
+                final isSelected = _selectedColor.value == color.value &&
+                    _representationType == RepresentationType.color;
+
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _representationType = RepresentationType.color;
+                      _selectedColor = color;
+                      _pickedImage = null;
+                      _imageBytes = null;
+                    });
+                    Navigator.pop(context);
+                  },
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected ? Colors.teal : Colors.black12,
+                        width: isSelected ? 3 : 1,
+                      ),
+                    ),
+                    child: color == Colors.white
+                        ? const Icon(Icons.circle_outlined,
+                            size: 14, color: Colors.black26)
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showImageOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2EEEE),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.upload_outlined),
+                  title: const Text('Upload'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _pickImage(ImageSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: const Text('Take Photo'),
+                  enabled: !kIsWeb,
+                  onTap: kIsWeb
+                      ? null
+                      : () async {
+                          Navigator.pop(context);
+                          await _pickImage(ImageSource.camera);
+                        },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSoldByRow() {
     return Row(
       children: [
-        const Text('Sold by'),
-        const SizedBox(width: 16),
-        ChoiceChip(
-          label: const Text('Each'),
-          selected: _soldBy == SoldBy.each,
-          onSelected: (_) => setState(() => _soldBy = SoldBy.each),
+        _soldByOption(
+          label: 'Each',
+          value: SoldBy.each,
         ),
-        const SizedBox(width: 8),
-        ChoiceChip(
-          label: const Text('Weight'),
-          selected: _soldBy == SoldBy.weight,
-          onSelected: (_) => setState(() => _soldBy = SoldBy.weight),
+        const SizedBox(width: 28),
+        _soldByOption(
+          label: 'Weight',
+          value: SoldBy.weight,
         ),
       ],
     );
   }
 
-  Widget _buildRepresentationSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Representation'),
-        const SizedBox(height: 8),
-        RadioGroup<RepresentationType>(
-          groupValue: _representationType,
-          onChanged: (RepresentationType? value) {
-            if (value == null) return;
-            setState(() {
-              _representationType = value;
-              if (value == RepresentationType.color) {
-                _pickedImage = null;
-                _imageBytes = null;
-              }
-            });
-          },
-          child: const Row(
-            children: [
-              Radio<RepresentationType>(value: RepresentationType.color),
-              Text('Color'),
-              SizedBox(width: 16),
-              Radio<RepresentationType>(value: RepresentationType.image),
-              Text('Image'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (_representationType == RepresentationType.color)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _availableColors.map((c) {
-              return GestureDetector(
-                onTap: () => setState(() => _selectedColor = c),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: c,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      width: 2,
-                      color: c == _selectedColor
-                          ? Colors.black
-                          : Colors.transparent,
+  Widget _soldByOption({
+    required String label,
+    required SoldBy value,
+  }) {
+    final selected = _soldBy == value;
+
+    return InkWell(
+      onTap: () => setState(() => _soldBy = value),
+      borderRadius: BorderRadius.circular(30),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: const Color(0xFF0C7B86),
+                width: 2,
+              ),
+            ),
+            child: selected
+                ? const Center(
+                    child: CircleAvatar(
+                      radius: 6,
+                      backgroundColor: Color(0xFF0C7B86),
                     ),
-                  ),
-                  child: c == _selectedColor
-                      ? const Icon(Icons.check, size: 20, color: Colors.white)
-                      : null,
-                ),
-              );
-            }).toList(),
-          )
-        else
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade400),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: _imageBytes == null
-                    ? const Icon(Icons.image, size: 40)
-                    : Image.memory(_imageBytes!, fit: BoxFit.cover),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: () => _pickImage(ImageSource.gallery),
-                    icon: const Icon(Icons.folder),
-                    label: const Text('Choose Photo'),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed:
-                        kIsWeb ? null : () => _pickImage(ImageSource.camera),
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Take Photo'),
-                  ),
-                ],
-              ),
-              if (kIsWeb)
-                const Text(
-                  "Camera is disabled on web preview. Use Choose Photo.",
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-            ],
+                  )
+                : null,
           ),
-      ],
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 16,
+              color: Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration({
+    required String hint,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(
+        color: Colors.black38,
+        fontSize: 16,
+      ),
+      filled: true,
+      fillColor: const Color(0xFFF7F4F4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      suffixIcon: suffixIcon,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Color(0xFF0C7B86), width: 1.2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Colors.redAccent),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Colors.redAccent),
+      ),
+    );
+  }
+
+  Widget _buildPreviewCircle() {
+    Widget child;
+
+    if (_representationType == RepresentationType.color) {
+      child = Container(color: _selectedColor);
+    } else if (_imageBytes != null) {
+      child = Image.memory(_imageBytes!, fit: BoxFit.cover);
+    } else {
+      child = Container(
+        color: const Color(0xFFD9D9D9),
+      );
+    }
+
+    return Center(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 132,
+            height: 132,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 8,
+                  offset: Offset(0, 4),
+                  color: Colors.black12,
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: child,
+          ),
+          Positioned(
+            right: -4,
+            bottom: -6,
+            child: GestureDetector(
+              onTap: _isSaving ? null : _showRepresentationOptions,
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black12),
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 4,
+                      offset: Offset(0, 2),
+                      color: Colors.black12,
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.edit, size: 18),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGradientBubble({
+    required double size,
+  }) {
+    return IgnorePointer(
+      child: Opacity(
+        opacity: 0.68,
+        child: Image.asset(
+          _gradientAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Item')),
+      backgroundColor: const Color(0xFFF0F4F6),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                const Text(
-                  'CREATE ITEM',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) => _validateRequired(v, 'Name'),
-                ),
-                TextFormField(
-                  controller: _categoryController,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                ),
-
-                const SizedBox(height: 12),
-                _buildSoldByRow(),
-                const SizedBox(height: 12),
-
-                TextFormField(
-                  controller: _priceController,
-                  decoration: const InputDecoration(labelText: 'Selling Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Selling Price'),
-                ),
-
-                // ✅ COST FIELD (Owner input)
-                TextFormField(
-                  controller: _costController,
-                  decoration: const InputDecoration(
-                    labelText: 'Cost (Purchase Price)',
+        child: Stack(
+          children: [
+            Positioned(
+              left: -120,
+              top: 10,
+              child: _buildGradientBubble(size: 320),
+            ),
+            Positioned(
+              right: -125,
+              top: 420,
+              child: _buildGradientBubble(size: 280),
+            ),
+            Positioned(
+              left: -115,
+              bottom: -10,
+              child: _buildGradientBubble(size: 250),
+            ),
+            Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back, color: Colors.black),
+                      ),
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            'Create Item',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 48),
+                    ],
                   ),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Cost'),
-                ),
-
-                TextFormField(
-                  controller: _barcodeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Barcode',
-                    suffixIcon: Icon(Icons.qr_code_scanner),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Switch(
-                      value: _trackStock,
-                      onChanged: (val) => setState(() => _trackStock = val),
+                  const SizedBox(height: 14),
+                  _buildPreviewCircle(),
+                  const SizedBox(height: 34),
+                  const Text(
+                    'Product Name',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
-                    const Text('Track Stock Quantity'),
-                  ],
-                ),
-                if (_trackStock)
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: _fieldDecoration(
+                      hint: 'Product Name',
+                      suffixIcon: const Icon(Icons.edit_outlined),
+                    ),
+                    validator: (v) => _validateRequired(v, 'Product Name'),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Category',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedCategory,
+                    decoration: _fieldDecoration(
+                      hint: 'Select Category',
+                    ),
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                    items: _categories.map((category) {
+                      return DropdownMenuItem<String>(
+                        value: category,
+                        child: Text(category),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategory = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Category is required';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Sold by',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildSoldByRow(),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Barcode',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _barcodeController,
+                    decoration: _fieldDecoration(
+                      hint: 'Barcode',
+                      suffixIcon: const Icon(Icons.qr_code_scanner),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Stock Quantity',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   TextFormField(
                     controller: _stockQtyController,
-                    decoration:
-                        const InputDecoration(labelText: 'Stock Quantity'),
+                    decoration: _fieldDecoration(
+                      hint: 'Quantity..',
+                    ),
                     keyboardType: TextInputType.number,
+                    validator: (v) => _validateRequired(v, 'Stock Quantity'),
                   ),
-
-                const SizedBox(height: 16),
-                _buildRepresentationSection(),
-                const SizedBox(height: 24),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveItem,
-                    child: _isSaving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Add Item'),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Selling Price',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _priceController,
+                    decoration: _fieldDecoration(
+                      hint: 'Selling Price',
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: (v) => _validateMoney(v, 'Selling Price'),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Cost (Purchase Price)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _costController,
+                    decoration: _fieldDecoration(
+                      hint: 'Cost',
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: (v) => _validateMoney(v, 'Cost'),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    height: 58,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _saveItem,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2AA39A),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'CREATE ITEM',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
