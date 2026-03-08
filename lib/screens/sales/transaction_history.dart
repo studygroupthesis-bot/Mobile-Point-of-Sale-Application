@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../transaction/receipt_screen.dart';
-//import 'receipt_screen.dart';
 
 class StoreContext {
   final String storeId;
@@ -34,6 +33,17 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
   }
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  double _safeToDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '0') ?? 0.0;
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
+  }
 
   Future<StoreContext> _loadStoreContext() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -152,28 +162,30 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
       final map = Map<String, dynamic>.from(e as Map);
       return ReceiptLine(
         name: (map['name'] ?? '').toString(),
-        price: (map['price'] as num?)?.toDouble() ?? 0,
-        qty: (map['qty'] as num?)?.toInt() ?? 0,
+        price: _safeToDouble(map['price']),
+        qty: _safeToInt(map['qty']),
       );
     }).toList();
 
     final receipt = ReceiptData(
       invoiceId: (data['invoiceId'] ?? doc.id).toString(),
+      invoiceNo: (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString(),
       storeName: (data['storeName'] ?? store.storeName).toString(),
       dateTime: _parseTxDate(data),
-      paymentMode: (data['paymentMode'] ?? 'Cash').toString(),
+      paymentMode:
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString(),
       cashierUid: (data['cashierUid'] ?? '').toString(),
-      subtotal: (data['subtotal'] as num?)?.toDouble() ?? 0,
-      tax: (data['tax'] as num?)?.toDouble() ?? 0,
-      grandTotal: (data['grandTotal'] as num?)?.toDouble() ?? 0,
-      amountReceived: (data['amountReceived'] as num?)?.toDouble() ?? 0,
-      change: (data['change'] as num?)?.toDouble() ?? 0,
+      subtotal: _safeToDouble(data['subtotal']),
+      tax: _safeToDouble(data['tax']),
+      grandTotal: _safeToDouble(data['grandTotal']),
+      amountReceived: _safeToDouble(data['amountReceived']),
+      change: _safeToDouble(data['change']),
       items: items,
     );
 
     if (!mounted) return;
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ReceiptScreen(data: receipt),
@@ -188,9 +200,11 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
     final data = doc.data();
     final date = _parseTxDate(data);
 
-    final invoiceId = (data['invoiceId'] ?? doc.id).toString();
-    final paymentMode = (data['paymentMode'] ?? 'Cash').toString();
-    final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+    final invoiceNo =
+        (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString();
+    final paymentMode =
+        (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString();
+    final amount = _safeToDouble(data['grandTotal']);
     final status = (data['status'] ?? 'Success').toString();
 
     return InkWell(
@@ -203,8 +217,8 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
             Container(
               width: 42,
               height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFFB8DFDA),
+              decoration: const BoxDecoration(
+                color: Color(0xFFB8DFDA),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -219,7 +233,7 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Invoice #$invoiceId',
+                    'Invoice #$invoiceNo',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -367,10 +381,7 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                           final totalSales = docs.fold<double>(
                             0,
                             (sum, doc) =>
-                                sum +
-                                ((doc.data()['grandTotal'] as num?)
-                                        ?.toDouble() ??
-                                    0),
+                                sum + _safeToDouble(doc.data()['grandTotal']),
                           );
 
                           return Column(

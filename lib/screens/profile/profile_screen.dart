@@ -36,10 +36,6 @@ class ProfileScreen extends StatelessWidget {
               /// BACK BUTTON + TITLE
               Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, size: 26),
-                    onPressed: () => Navigator.pop(context),
-                  ),
                   const SizedBox(width: 5),
                   const Text(
                     "My Business",

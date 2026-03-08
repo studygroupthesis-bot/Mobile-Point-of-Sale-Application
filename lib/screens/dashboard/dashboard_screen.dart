@@ -61,6 +61,16 @@ class DashboardSummaryData {
   });
 }
 
+class DashboardBarData {
+  final String label;
+  final double value;
+
+  const DashboardBarData({
+    required this.label,
+    required this.value,
+  });
+}
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -69,7 +79,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // ✅ Keep false for now to avoid heavy yearly reads
+  // Keep false for now to avoid heavy yearly reads
   static const bool allowYearly = false;
 
   late final Future<DashboardStoreContext> _storeFuture;
@@ -193,6 +203,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _money(num value) => '₱ ${value.toStringAsFixed(2)}';
+
+  String _compactMoneyLabel(double value) {
+    if (value >= 1000000) {
+      return '₱${(value / 1000000).toStringAsFixed(1)}M';
+    }
+    if (value >= 1000) {
+      return '₱${(value / 1000).toStringAsFixed(1)}k';
+    }
+    return '₱${value.toStringAsFixed(0)}';
+  }
 
   int _sumProducts(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     int total = 0;
@@ -320,6 +340,207 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _showSnack('CSV summary copied to clipboard.');
   }
 
+  DateTime _txDate(Map<String, dynamic> data) {
+    final ts = data['createdAt'];
+    if (ts is Timestamp) return ts.toDate();
+
+    final local = data['createdAtLocal'];
+    if (local is String) {
+      final parsed = DateTime.tryParse(local);
+      if (parsed != null) return parsed;
+    }
+
+    return DateTime.now();
+  }
+
+  List<DashboardBarData> _buildGraphData(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    DashboardRange range,
+  ) {
+    switch (_selectedFilter) {
+      case DashboardFilter.thisWeek:
+      case DashboardFilter.lastWeek:
+        final labels = ['M', 'T', 'W', 'TH', 'F', 'S', 'SU'];
+        final values = List<double>.filled(7, 0);
+
+        for (final doc in docs) {
+          final data = doc.data();
+          final date = _txDate(data);
+          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+
+          final index = date.difference(range.start).inDays;
+          if (index >= 0 && index < 7) {
+            values[index] += amount;
+          }
+        }
+
+        return List.generate(
+          7,
+          (i) => DashboardBarData(label: labels[i], value: values[i]),
+        );
+
+      case DashboardFilter.monthly:
+        final labels = ['W1', 'W2', 'W3', 'W4', 'W5'];
+        final values = List<double>.filled(5, 0);
+
+        for (final doc in docs) {
+          final data = doc.data();
+          final date = _txDate(data);
+          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+
+          int weekIndex = ((date.day - 1) ~/ 7);
+          if (weekIndex > 4) weekIndex = 4;
+
+          values[weekIndex] += amount;
+        }
+
+        return List.generate(
+          5,
+          (i) => DashboardBarData(label: labels[i], value: values[i]),
+        );
+
+      case DashboardFilter.yearly:
+        final labels = [
+          'J',
+          'F',
+          'M',
+          'A',
+          'M',
+          'J',
+          'J',
+          'A',
+          'S',
+          'O',
+          'N',
+          'D'
+        ];
+        final values = List<double>.filled(12, 0);
+
+        for (final doc in docs) {
+          final data = doc.data();
+          final date = _txDate(data);
+          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+
+          final index = date.month - 1;
+          if (index >= 0 && index < 12) {
+            values[index] += amount;
+          }
+        }
+
+        return List.generate(
+          12,
+          (i) => DashboardBarData(label: labels[i], value: values[i]),
+        );
+    }
+  }
+
+  Widget _buildSummaryGraph(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    DashboardRange range,
+  ) {
+    final bars = _buildGraphData(docs, range);
+    final maxValue = bars.fold<double>(
+      0,
+      (max, bar) => bar.value > max ? bar.value : max,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.88),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Sales',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            range.subtitle,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 170,
+            child: bars.every((e) => e.value <= 0)
+                ? const Center(
+                    child: Text(
+                      'No sales data for this period.',
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: bars.map((bar) {
+                      final ratio =
+                          maxValue <= 0 ? 0.0 : (bar.value / maxValue);
+                      final barHeight = 18 + (ratio * 95);
+
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(
+                                bar.value <= 0
+                                    ? '0'
+                                    : _compactMoneyLabel(bar.value),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                height: barHeight,
+                                decoration: BoxDecoration(
+                                  color: bar.label == bars.last.label
+                                      ? const Color(0xFF0E6C73)
+                                      : const Color(0xFF88C7BF),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                bar.label,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final range = _currentRange();
@@ -357,6 +578,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'createdAt',
                   isLessThan: Timestamp.fromDate(range.end),
                 )
+                .orderBy('createdAt', descending: true)
                 .snapshots();
 
             return Center(
@@ -614,40 +836,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                         const SizedBox(height: 12),
 
-                        // Summary card
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.88),
-                            borderRadius: BorderRadius.circular(16),
+                        // Graph
+                        _buildSummaryGraph(docs, range),
+
+                        if (!allowYearly) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Yearly view is disabled for now to avoid loading too many transaction records.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _summaryRow('Selected Range', range.subtitle),
-                              const SizedBox(height: 8),
-                              _summaryRow('Sales Total', _money(totalSales)),
-                              const SizedBox(height: 8),
-                              _summaryRow(
-                                'Number of Sales',
-                                '$transactionCount',
-                              ),
-                              const SizedBox(height: 8),
-                              _summaryRow('Items Sold', '$totalProductsSold'),
-                              if (!allowYearly) ...[
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'Yearly view is disabled for now to avoid loading too many transaction records.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
+                        ],
 
                         const SizedBox(height: 14),
 
@@ -777,19 +978,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _summaryRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label),
-        Text(
-          value,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-      ],
     );
   }
 }
