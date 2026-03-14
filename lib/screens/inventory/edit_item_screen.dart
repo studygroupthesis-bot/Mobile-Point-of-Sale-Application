@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../services/cloudinary_service.dart';
 import 'add_stock_screen.dart';
+import '../../screens/transaction/barcode_scanner_screen.dart';
 
 enum SoldBy { each, weight }
 
@@ -340,6 +341,57 @@ class _EditItemScreenState extends State<EditItemScreen> {
     return null;
   }
 
+  String _normalizeBarcode(String value) {
+    return value.trim();
+  }
+
+  Future<void> _scanBarcodeIntoField() async {
+    if (saving) return;
+
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const BarcodeScannerScreen(),
+      ),
+    );
+
+    if (!mounted || code == null) return;
+
+    final normalized = _normalizeBarcode(code);
+    if (normalized.isEmpty) return;
+
+    setState(() {
+      barcode.text = normalized;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Barcode captured: $normalized')),
+    );
+  }
+
+  Future<bool> _barcodeExistsInStore({
+    required String storeId,
+    required String barcodeValue,
+    required String ignoreItemId,
+  }) async {
+    if (barcodeValue.isEmpty) return false;
+
+    final snap = await FirebaseFirestore.instance
+        .collection('stores')
+        .doc(storeId)
+        .collection('items')
+        .where('barcode', isEqualTo: barcodeValue)
+        .limit(10)
+        .get();
+
+    for (final doc in snap.docs) {
+      if (doc.id != ignoreItemId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   Future<void> updateItem() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -354,6 +406,26 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
     try {
       final storeId = _storeId ?? await _requireStoreId();
+      final barcodeValue = _normalizeBarcode(barcode.text);
+
+      if (barcodeValue.isNotEmpty) {
+        final exists = await _barcodeExistsInStore(
+          storeId: storeId,
+          barcodeValue: barcodeValue,
+          ignoreItemId: widget.itemId,
+        );
+
+        if (exists) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Barcode already exists for another item.'),
+            ),
+          );
+          return;
+        }
+      }
+
       final uploaded = await _uploadImageIfNeeded();
 
       final updateData = <String, dynamic>{
@@ -362,10 +434,9 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'category': category.text.trim(),
         'price': double.tryParse(price.text.trim()) ?? 0,
         'cost': double.tryParse(cost.text.trim()) ?? 0,
-        'barcode': barcode.text.trim(),
+        'barcode': barcodeValue,
         'soldBy': soldBy == SoldBy.each ? 'each' : 'weight',
         'trackStock': true,
-        // keep existing stockQty field; stock-in should go through Add Stock
         'stockQty': int.tryParse(stockQty.text.trim()) ?? 0,
         'representationType':
             representation == RepresentationType.color ? 'color' : 'image',
@@ -820,6 +891,48 @@ class _EditItemScreenState extends State<EditItemScreen> {
     );
   }
 
+  Widget _buildBarcodeField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel('Barcode'),
+        TextFormField(
+          controller: barcode,
+          decoration: _fieldDecoration(
+            hintText: 'Scan or enter barcode',
+            suffixIcon: SizedBox(
+              width: 96,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Scan barcode',
+                    onPressed: _scanBarcodeIntoField,
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Clear barcode',
+                    onPressed: () {
+                      setState(() {
+                        barcode.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Optional, but barcode should be unique per item.',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+
   Widget _buildStockActionSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -918,14 +1031,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
                   validator: (v) => _validateMoney(v, 'Cost'),
                 ),
                 const SizedBox(height: 14),
-                _buildLabel('Barcode'),
-                TextFormField(
-                  controller: barcode,
-                  decoration: _fieldDecoration(
-                    hintText: '',
-                    suffixIcon: const Icon(Icons.qr_code_2_rounded),
-                  ),
-                ),
+                _buildBarcodeField(),
                 const SizedBox(height: 14),
                 _buildStockActionSection(),
                 const SizedBox(height: 28),

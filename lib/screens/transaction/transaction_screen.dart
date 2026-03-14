@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'barcode_scanner_screen.dart';
 import 'receipt_screen.dart';
 
 class StorePaymentConfig {
@@ -291,6 +292,21 @@ class _TransactionScreenState extends State<TransactionScreen> {
     controller.dispose();
 
     if (code == null || code.trim().isEmpty) return;
+    await _addItemByBarcode(code.trim());
+  }
+
+  Future<void> _openBarcodeScannerCamera() async {
+    if (_loadingAdd || _processingCheckout) return;
+
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const BarcodeScannerScreen(),
+      ),
+    );
+
+    if (!mounted) return;
+    if (code == null || code.trim().isEmpty) return;
+
     await _addItemByBarcode(code.trim());
   }
 
@@ -589,138 +605,100 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final now = DateTime.now();
       final invoiceNo = _makeInvoiceNo(txRef.id);
 
-      debugPrint('================ CHECKOUT START ================');
-      debugPrint('STORE ID: $storeId');
-      debugPrint('USER UID: ${user.uid}');
-      debugPrint('PAYMENT MODE: $paymentMode');
-      debugPrint('SUBTOTAL: $subtotal');
-      debugPrint('TAX: $vat12');
-      debugPrint('GRAND TOTAL: $grandTotal');
-      debugPrint('TX REF: ${txRef.path}');
-      debugPrint('CART COUNT: ${_cart.length}');
-
       await firestore.runTransaction((transaction) async {
-        try {
-          final itemRefs = <String, DocumentReference<Map<String, dynamic>>>{};
-          final currentStocks = <String, int>{};
+        final itemRefs = <String, DocumentReference<Map<String, dynamic>>>{};
+        final currentStocks = <String, int>{};
 
-          // READS FIRST
-          for (final cartItem in _cart) {
-            final itemRef = firestore
-                .collection('stores')
-                .doc(storeId)
-                .collection('items')
-                .doc(cartItem.itemId);
+        for (final cartItem in _cart) {
+          final itemRef = firestore
+              .collection('stores')
+              .doc(storeId)
+              .collection('items')
+              .doc(cartItem.itemId);
 
-            debugPrint('READ ITEM: ${cartItem.itemId} / ${cartItem.name}');
-            final itemSnap = await transaction.get(itemRef);
-            debugPrint('ITEM EXISTS: ${itemSnap.exists}');
+          final itemSnap = await transaction.get(itemRef);
 
-            if (!itemSnap.exists) {
-              throw Exception('Item "${cartItem.name}" no longer exists.');
-            }
-
-            final data = itemSnap.data() as Map<String, dynamic>? ?? {};
-            debugPrint('RAW ITEM DATA: $data');
-
-            final currentStock = _safeToInt(data['stockQty']);
-            debugPrint('CURRENT STOCK: $currentStock');
-            debugPrint('REQUESTED QTY: ${cartItem.qty}');
-
-            if (currentStock < cartItem.qty) {
-              throw Exception(
-                'Not enough stock for "${cartItem.name}". '
-                'Available: $currentStock, Requested: ${cartItem.qty}',
-              );
-            }
-
-            itemRefs[cartItem.itemId] = itemRef;
-            currentStocks[cartItem.itemId] = currentStock;
+          if (!itemSnap.exists) {
+            throw Exception('Item "${cartItem.name}" no longer exists.');
           }
 
-          debugPrint('ALL READS DONE');
+          final data = itemSnap.data() as Map<String, dynamic>? ?? {};
+          final currentStock = _safeToInt(data['stockQty']);
 
-          // WRITE TRANSACTION
-          debugPrint('SETTING TRANSACTION DOC...');
-          transaction.set(txRef, {
-            'createdAt': FieldValue.serverTimestamp(),
-            'createdAtLocal': now.toIso8601String(),
-            'invoiceId': txRef.id,
-            'invoiceNo': invoiceNo,
-            'invoiceNoLower': invoiceNo.toLowerCase(),
-            'storeId': storeId,
-            'storeName': config.storeName,
-            'paymentMethod': paymentMode,
-            'paymentMode': paymentMode,
-            'total': grandTotal,
-            'status': 'Success',
-            'cashierUid': user.uid,
-            'subtotal': subtotal,
-            'tax': vat12,
-            'grandTotal': grandTotal,
-            'amountReceived': amountReceived,
-            'change': change,
-            'items': _cart.map((i) {
-              return {
-                'itemId': i.itemId,
-                'name': i.name,
-                'barcode': i.barcode,
-                'price': i.price,
-                'qty': i.qty,
-                'total': i.total,
-              };
-            }).toList(),
+          if (currentStock < cartItem.qty) {
+            throw Exception(
+              'Not enough stock for "${cartItem.name}". '
+              'Available: $currentStock, Requested: ${cartItem.qty}',
+            );
+          }
+
+          itemRefs[cartItem.itemId] = itemRef;
+          currentStocks[cartItem.itemId] = currentStock;
+        }
+
+        transaction.set(txRef, {
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdAtLocal': now.toIso8601String(),
+          'invoiceId': txRef.id,
+          'invoiceNo': invoiceNo,
+          'invoiceNoLower': invoiceNo.toLowerCase(),
+          'storeId': storeId,
+          'storeName': config.storeName,
+          'paymentMethod': paymentMode,
+          'paymentMode': paymentMode,
+          'total': grandTotal,
+          'status': 'Success',
+          'cashierUid': user.uid,
+          'subtotal': subtotal,
+          'tax': vat12,
+          'grandTotal': grandTotal,
+          'amountReceived': amountReceived,
+          'change': change,
+          'items': _cart.map((i) {
+            return {
+              'itemId': i.itemId,
+              'name': i.name,
+              'barcode': i.barcode,
+              'price': i.price,
+              'qty': i.qty,
+              'total': i.total,
+            };
+          }).toList(),
+        });
+
+        for (final cartItem in _cart) {
+          final itemRef = itemRefs[cartItem.itemId]!;
+          final currentStock = currentStocks[cartItem.itemId]!;
+          final newStock = currentStock - cartItem.qty;
+
+          transaction.update(itemRef, {
+            'stockQty': newStock,
+            'updatedAt': FieldValue.serverTimestamp(),
           });
 
-          // WRITE STOCK UPDATES + LOGS
-          for (final cartItem in _cart) {
-            final itemRef = itemRefs[cartItem.itemId]!;
-            final currentStock = currentStocks[cartItem.itemId]!;
-            final newStock = currentStock - cartItem.qty;
+          final stockLogRef = firestore
+              .collection('stores')
+              .doc(storeId)
+              .collection('stock_logs')
+              .doc();
 
-            debugPrint(
-              'UPDATING ITEM ${cartItem.itemId}: $currentStock -> $newStock',
-            );
-
-            transaction.update(itemRef, {
-              'stockQty': newStock,
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-
-            final stockLogRef = firestore
-                .collection('stores')
-                .doc(storeId)
-                .collection('stock_logs')
-                .doc();
-
-            debugPrint('CREATING STOCK LOG: ${stockLogRef.path}');
-
-            transaction.set(stockLogRef, {
-              'createdAt': FieldValue.serverTimestamp(),
-              'itemId': cartItem.itemId,
-              'itemName': cartItem.name,
-              'barcode': cartItem.barcode,
-              'type': 'stock_out',
-              'reason': 'sale',
-              'qty': cartItem.qty,
-              'beforeQty': currentStock,
-              'afterQty': newStock,
-              'referenceId': txRef.id,
-              'referenceType': 'transaction',
-              'invoiceNo': invoiceNo,
-              'cashierUid': user.uid,
-            });
-          }
-
-          debugPrint('TX BODY FINISHED');
-        } catch (e, st) {
-          debugPrint('INNER TX ERROR: $e');
-          debugPrint('INNER TX STACK: $st');
-          rethrow;
+          transaction.set(stockLogRef, {
+            'createdAt': FieldValue.serverTimestamp(),
+            'itemId': cartItem.itemId,
+            'itemName': cartItem.name,
+            'barcode': cartItem.barcode,
+            'type': 'stock_out',
+            'reason': 'sale',
+            'qty': cartItem.qty,
+            'beforeQty': currentStock,
+            'afterQty': newStock,
+            'referenceId': txRef.id,
+            'referenceType': 'transaction',
+            'invoiceNo': invoiceNo,
+            'cashierUid': user.uid,
+          });
         }
       });
-
-      debugPrint('RUN TRANSACTION SUCCESS');
 
       final receipt = ReceiptData(
         invoiceId: txRef.id,
@@ -757,28 +735,84 @@ class _TransactionScreenState extends State<TransactionScreen> {
           builder: (_) => ReceiptScreen(data: receipt),
         ),
       );
-
-      debugPrint('================ CHECKOUT END ================');
-    } on FirebaseException catch (e, st) {
-      debugPrint('FIREBASE ERROR CODE: ${e.code}');
-      debugPrint('FIREBASE ERROR MESSAGE: ${e.message}');
-      debugPrint('FIREBASE ERROR: $e');
-      debugPrint('FIREBASE STACK: $st');
-
+    } on FirebaseException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Checkout failed: ${e.message ?? e.code}')),
       );
-    } catch (e, st) {
-      debugPrint('CHECKOUT ERROR TYPE: ${e.runtimeType}');
-      debugPrint('CHECKOUT ERROR: $e');
-      debugPrint('CHECKOUT STACK: $st');
-
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Checkout failed: $e')),
       );
     }
+  }
+
+  Widget _buildScannerCard() {
+    return GestureDetector(
+      onTap: _openBarcodeScannerCamera,
+      child: Container(
+        height: 110,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Center(
+          child: _loadingAdd
+              ? const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'Looking up scanned barcode...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                )
+              : const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.qr_code_scanner_rounded,
+                      size: 38,
+                      color: Color(0xFF00A88B),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'Tap to scan barcode',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Opens camera scanner',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -812,37 +846,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: _openBarcodeInputDialog,
-                  child: Container(
-                    height: 90,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        15,
-                        (index) => Container(
-                          width: index.isEven ? 4 : 2,
-                          height: 60,
-                          margin: const EdgeInsets.symmetric(horizontal: 1),
-                          color: index.isEven ? Colors.black87 : Colors.black26,
-                        ),
-                      ),
-                    ),
+                _buildScannerCard(),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _loadingAdd ? null : _openBarcodeInputDialog,
+                    child: const Text('Enter barcode manually'),
                   ),
                 ),
-                const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
