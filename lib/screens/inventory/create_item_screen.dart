@@ -43,8 +43,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   List<String> _savedCategories = [];
 
   static const Color _teal = Color(0xFF0C7C86);
-  static const Color _fieldFill = Color(0xFFE6E6E6);
+  static const Color _fieldFill = Color(0xFFF7F4F4);
   static const Color _fieldBorder = Color(0xFFD0D0D0);
+  static const String _gradientAsset = 'assets/Gradient.png';
 
   final List<Color> _availableColors = const [
     Colors.grey,
@@ -142,18 +143,16 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      throw Exception("Not logged in. Please login again.");
+      throw Exception('Not logged in. Please login again.');
     }
 
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final snap =
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
       throw Exception(
-        "Missing storeId in users/${user.uid}. Add storeId to the user profile.",
+        'Missing storeId in users/${user.uid}. Add storeId to the user profile.',
       );
     }
     return storeId;
@@ -200,14 +199,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       filename: _pickedImage!.name,
     );
 
-    final imageUrl = res["secure_url"] as String?;
-    final publicId = res["public_id"] as String?;
+    final imageUrl = res['secure_url'] as String?;
+    final publicId = res['public_id'] as String?;
 
     if (imageUrl == null || publicId == null) {
-      throw Exception("Cloudinary response missing secure_url or public_id.");
+      throw Exception('Cloudinary response missing secure_url or public_id.');
     }
 
-    return {"imageUrl": imageUrl, "imagePublicId": publicId};
+    return {
+      'imageUrl': imageUrl,
+      'imagePublicId': publicId,
+    };
   }
 
   String? _validateRequired(String? value, String field) {
@@ -251,8 +253,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       final stockQty = int.tryParse(_stockQtyController.text.trim()) ?? 0;
 
       final upload = await _uploadImageIfNeeded();
-      final imageUrl = upload?["imageUrl"];
-      final imagePublicId = upload?["imagePublicId"];
+      final imageUrl = upload?['imageUrl'];
+      final imagePublicId = upload?['imagePublicId'];
 
       final itemData = {
         'name': _nameController.text.trim(),
@@ -306,21 +308,27 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return SafeArea(
-          child: Padding(
+          child: Container(
+            margin: const EdgeInsets.all(16),
             padding: EdgeInsets.fromLTRB(
               16,
               16,
               16,
               16 + MediaQuery.of(sheetContext).viewInsets.bottom,
             ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Select Category',
+                    'Choose or type category',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 14),
@@ -376,13 +384,22 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     width: double.infinity,
                     height: 46,
                     child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2AA39A),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
                       onPressed: () {
                         final value = newCategoryController.text.trim();
                         if (value.isEmpty) return;
                         _setCategory(value);
                         Navigator.pop(sheetContext);
                       },
-                      child: const Text('USE CATEGORY'),
+                      child: const Text(
+                        'USE CATEGORY',
+                        style: TextStyle(color: Colors.white),
+                      ),
                     ),
                   ),
                 ],
@@ -398,14 +415,20 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return SafeArea(
-          child: Padding(
+          child: Container(
+            margin: const EdgeInsets.all(16),
             padding: EdgeInsets.fromLTRB(
               16,
               16,
               16,
               16 + MediaQuery.of(sheetContext).viewInsets.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
             ),
             child: SingleChildScrollView(
               child: Column(
@@ -509,19 +532,22 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       hintText: hintText,
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: _fieldFill,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      hintStyle: const TextStyle(color: Colors.grey),
+      fillColor: const Color(0xFFF7F4F4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      hintStyle: const TextStyle(
+        color: Colors.grey,
+        fontSize: 15,
+      ),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _fieldBorder),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _fieldBorder),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _teal, width: 1.2),
       ),
     );
@@ -544,8 +570,8 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: 92,
-            height: 92,
+            width: 128,
+            height: 128,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: _representationType == RepresentationType.color
@@ -561,31 +587,54 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: _representationType == RepresentationType.image &&
                     _imageBytes == null
-                ? const Icon(Icons.image_outlined, color: Colors.grey, size: 30)
+                ? const Icon(Icons.image_outlined, color: Colors.grey, size: 34)
                 : null,
           ),
           Positioned(
-            right: -2,
-            bottom: -2,
+            right: -4,
+            bottom: 6,
             child: Container(
-              width: 28,
-              height: 28,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: Colors.white,
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.black12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.edit, size: 15),
+              child: const Icon(Icons.edit, size: 18),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGradientBubble({
+    required double size,
+  }) {
+    return IgnorePointer(
+      child: Opacity(
+        opacity: 0.68,
+        child: Image.asset(
+          _gradientAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -602,17 +651,17 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       child: Row(
         children: [
           Container(
-            width: 24,
-            height: 24,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: _teal, width: 1.4),
+              border: Border.all(color: _teal, width: 1.5),
             ),
             child: selected
                 ? Center(
                     child: Container(
-                      width: 11,
-                      height: 11,
+                      width: 12,
+                      height: 12,
                       decoration: const BoxDecoration(
                         color: _teal,
                         shape: BoxShape.circle,
@@ -621,8 +670,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   )
                 : null,
           ),
-          const SizedBox(width: 8),
-          Text(label),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 15),
+          ),
         ],
       ),
     );
@@ -650,7 +702,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    value.isEmpty ? 'Choose or type category' : value,
+                    value.isEmpty ? 'Select or add category' : value,
                     style: TextStyle(
                       color: value.isEmpty ? Colors.grey : Colors.black87,
                     ),
@@ -668,89 +720,155 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Item')),
+      backgroundColor: const Color(0xFFF0F4F6),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                const SizedBox(height: 8),
-                Center(child: _buildPreviewCircle()),
-                const SizedBox(height: 28),
-                _buildLabel('Product Name'),
-                TextFormField(
-                  controller: _nameController,
-                  decoration: _fieldDecoration(
-                    hintText: 'Product Name',
-                    suffixIcon: const Icon(Icons.edit_outlined, size: 18),
-                  ),
-                  validator: (v) => _validateRequired(v, 'Product Name'),
-                ),
-                const SizedBox(height: 14),
-                _buildCategoryField(),
-                const SizedBox(height: 14),
-                _buildLabel('Sold by'),
-                Row(
+        child: Stack(
+          children: [
+            Positioned(
+              left: -120,
+              top: -10,
+              child: _buildGradientBubble(size: 320),
+            ),
+            Positioned(
+              right: -125,
+              top: 420,
+              child: _buildGradientBubble(size: 280),
+            ),
+            Positioned(
+              left: -115,
+              bottom: -10,
+              child: _buildGradientBubble(size: 250),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+              child: Form(
+                key: _formKey,
+                child: ListView(
                   children: [
-                    _buildSoldByOption(label: 'Each', value: SoldBy.each),
-                    const SizedBox(width: 34),
-                    _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon:
+                              const Icon(Icons.arrow_back, color: Colors.black),
+                        ),
+                        const Expanded(
+                          child: Center(
+                            child: Text(
+                              'Create Item',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 48),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Center(child: _buildPreviewCircle()),
+                    const SizedBox(height: 34),
+                    _buildLabel('Product Name'),
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: _fieldDecoration(
+                        hintText: 'Product Name',
+                        suffixIcon: const Icon(Icons.edit_outlined, size: 18),
+                      ),
+                      validator: (v) => _validateRequired(v, 'Product Name'),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildCategoryField(),
+                    const SizedBox(height: 14),
+                    _buildLabel('Sold by'),
+                    Row(
+                      children: [
+                        _buildSoldByOption(
+                          label: 'Each',
+                          value: SoldBy.each,
+                        ),
+                        const SizedBox(width: 34),
+                        _buildSoldByOption(
+                          label: 'Weight',
+                          value: SoldBy.weight,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Barcode'),
+                    TextFormField(
+                      controller: _barcodeController,
+                      decoration: _fieldDecoration(
+                        hintText: 'Barcode',
+                        suffixIcon: const Icon(Icons.qr_code_2_rounded),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Stock Quantity'),
+                    TextFormField(
+                      controller: _stockQtyController,
+                      decoration: _fieldDecoration(hintText: 'Quantity..'),
+                      keyboardType: TextInputType.number,
+                      validator: (v) =>
+                          _validateWholeNumber(v, 'Stock Quantity'),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Selling Price'),
+                    TextFormField(
+                      controller: _priceController,
+                      decoration: _fieldDecoration(hintText: 'Price'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) => _validateMoney(v, 'Selling Price'),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Cost'),
+                    TextFormField(
+                      controller: _costController,
+                      decoration: _fieldDecoration(hintText: 'Cost'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) => _validateMoney(v, 'Cost'),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: _isSaving ? null : _saveItem,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2AA39A),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: _isSaving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'CREATE ITEM',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                _buildLabel('Selling Price'),
-                TextFormField(
-                  controller: _priceController,
-                  decoration: _fieldDecoration(hintText: 'Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Selling Price'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Cost'),
-                TextFormField(
-                  controller: _costController,
-                  decoration: _fieldDecoration(hintText: 'Cost'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Cost'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Barcode'),
-                TextFormField(
-                  controller: _barcodeController,
-                  decoration: _fieldDecoration(
-                    hintText: '',
-                    suffixIcon: const Icon(Icons.qr_code_2_rounded),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Stock Quantity'),
-                TextFormField(
-                  controller: _stockQtyController,
-                  decoration: _fieldDecoration(hintText: 'Quantity..'),
-                  keyboardType: TextInputType.number,
-                  validator: (v) => _validateWholeNumber(v, 'Stock Quantity'),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveItem,
-                    child: _isSaving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('CREATE ITEM'),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

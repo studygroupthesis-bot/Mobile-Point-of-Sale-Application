@@ -720,6 +720,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
         }
       });
 
+      final verifySnap = await txRef.get();
+      debugPrint('VERIFY TX EXISTS: ${verifySnap.exists}');
+      debugPrint('VERIFY TX DATA: ${verifySnap.data()}');
+
       debugPrint('RUN TRANSACTION SUCCESS');
 
       final receipt = ReceiptData(

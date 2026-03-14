@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'widget/custom_text_field.dart';
 import 'login_screen.dart';
+import 'verify_email_screen.dart';
 import '../../firebase/stores_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -65,23 +66,46 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: password.text.trim(),
       );
 
+      final user = cred.user;
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: 'user-null',
+          message: 'User was not created.',
+        );
+      }
+
       await StoreService().createStoreForOwner(
-        ownerUid: cred.user!.uid,
+        ownerUid: user.uid,
         email: email.text.trim(),
         ownerName: name.text.trim(),
         businessName: business.text.trim(),
       );
 
+      await user.sendEmailVerification();
+
       if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        MaterialPageRoute(
+          builder: (_) => VerifyEmailScreen(email: email.text.trim()),
+        ),
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
+
+      String message = e.message ?? "Registration failed";
+
+      if (e.code == 'email-already-in-use') {
+        message = "That email is already registered.";
+      } else if (e.code == 'invalid-email') {
+        message = "Please enter a valid email address.";
+      } else if (e.code == 'weak-password') {
+        message = "Password is too weak.";
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? "Registration failed")),
+        SnackBar(content: Text(message)),
       );
     } catch (_) {
       if (!mounted) return;
@@ -142,7 +166,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         height: logoHeight,
                       ),
                       SizedBox(height: isSmallPhone ? 14 : 18),
-
                       Expanded(
                         child: Container(
                           width: double.infinity,
@@ -169,7 +192,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 hintText: "Juan Dela Cruz",
                                 icon: Icons.person,
                               ),
-
                               SizedBox(height: fieldGap),
                               _label("Email"),
                               CustomTextField(
@@ -178,7 +200,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 hintText: "example@gmail.com",
                                 icon: Icons.email,
                               ),
-
                               SizedBox(height: fieldGap),
                               _label("Password"),
                               CustomTextField(
@@ -188,7 +209,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.lock,
                                 isPassword: true,
                               ),
-
                               SizedBox(height: fieldGap),
                               _label("Confirm Password"),
                               CustomTextField(
@@ -198,7 +218,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.lock,
                                 isPassword: true,
                               ),
-
                               SizedBox(height: fieldGap),
                               _label("Business Name"),
                               CustomTextField(
@@ -207,9 +226,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 hintText: "example business name",
                                 icon: Icons.business_center,
                               ),
-
                               SizedBox(height: isSmallPhone ? 12 : 14),
-
                               Center(
                                 child: SizedBox(
                                   width: buttonWidth,
@@ -242,12 +259,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   ),
                                 ),
                               ),
-
                               const SizedBox(height: 12),
-
                               Center(
                                 child: GestureDetector(
-                                  onTap: () => Navigator.pop(context),
+                                  onTap: () => Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const LoginScreen(),
+                                    ),
+                                  ),
                                   child: const Text(
                                     "Already have an account? Login here!",
                                     style: TextStyle(color: Colors.white),
@@ -255,7 +275,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   ),
                                 ),
                               ),
-
                               const Spacer(),
                             ],
                           ),

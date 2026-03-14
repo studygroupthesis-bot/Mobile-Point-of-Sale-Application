@@ -29,12 +29,19 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   bool _saving = false;
   bool _initialized = false;
 
-  // Permissions
-  bool _inventoryAccess = true;
-  bool _salesAccess = true;
-  bool _transactionHistoryAccess = true;
-  bool _receiptAccess = true;
-  bool _profileAccess = true;
+  // New detailed permissions
+  bool _viewInventory = true;
+  bool _addStock = true;
+  bool _reduceStock = true;
+  bool _pullOutStock = true;
+
+  bool _processSales = true;
+  bool _editCart = true;
+
+  bool _viewTransactions = true;
+  bool _viewReceipts = true;
+
+  bool _viewProfile = true;
 
   bool get isEdit => widget.memberUid != null;
 
@@ -60,30 +67,52 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   void _loadPermissions(Map<String, dynamic> data) {
     final perms = (data['permissions'] as Map<String, dynamic>?) ?? {};
 
-    _inventoryAccess = perms['inventoryAccess'] ?? true;
-    _salesAccess = perms['salesAccess'] ?? true;
-    _transactionHistoryAccess = perms['transactionHistoryAccess'] ?? true;
-    _receiptAccess = perms['receiptAccess'] ?? true;
-    _profileAccess = perms['profileAccess'] ?? true;
+    // Supports BOTH old and new keys for backward compatibility
+    final oldInventory = perms['inventoryAccess'];
+    final oldSales = perms['salesAccess'];
+    final oldTransactions = perms['transactionHistoryAccess'];
+    final oldReceipts = perms['receiptAccess'];
+    final oldProfile = perms['profileAccess'];
+
+    _viewInventory = perms['viewInventory'] ?? oldInventory ?? true;
+    _addStock = perms['addStock'] ?? oldInventory ?? true;
+    _reduceStock = perms['reduceStock'] ?? oldInventory ?? true;
+    _pullOutStock = perms['pullOutStock'] ?? oldInventory ?? true;
+
+    _processSales = perms['processSales'] ?? oldSales ?? true;
+    _editCart = perms['editCart'] ?? oldSales ?? true;
+
+    _viewTransactions = perms['viewTransactions'] ?? oldTransactions ?? true;
+    _viewReceipts = perms['viewReceipts'] ?? oldReceipts ?? true;
+
+    _viewProfile = perms['viewProfile'] ?? oldProfile ?? true;
   }
 
   Map<String, dynamic> _buildPermissions() {
     if (_role == 'admin') {
       return {
-        'inventoryAccess': true,
-        'salesAccess': true,
-        'transactionHistoryAccess': true,
-        'receiptAccess': true,
-        'profileAccess': true,
+        'viewInventory': true,
+        'addStock': true,
+        'reduceStock': true,
+        'pullOutStock': true,
+        'processSales': true,
+        'editCart': true,
+        'viewTransactions': true,
+        'viewReceipts': true,
+        'viewProfile': true,
       };
     }
 
     return {
-      'inventoryAccess': _inventoryAccess,
-      'salesAccess': _salesAccess,
-      'transactionHistoryAccess': _transactionHistoryAccess,
-      'receiptAccess': _receiptAccess,
-      'profileAccess': _profileAccess,
+      'viewInventory': _viewInventory,
+      'addStock': _addStock,
+      'reduceStock': _reduceStock,
+      'pullOutStock': _pullOutStock,
+      'processSales': _processSales,
+      'editCart': _editCart,
+      'viewTransactions': _viewTransactions,
+      'viewReceipts': _viewReceipts,
+      'viewProfile': _viewProfile,
     };
   }
 
@@ -101,9 +130,16 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
       return;
     }
 
-    if (email.isEmpty || pass.isEmpty) {
+    if (!isEdit && email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email and Password are required')),
+        const SnackBar(content: Text('Email is required')),
+      );
+      return;
+    }
+
+    if (!isEdit && pass.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password is required')),
       );
       return;
     }
@@ -121,13 +157,6 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           permissions: permissions,
         );
       } else {
-        if (email.isEmpty || pass.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Email and Password are required')),
-          );
-          return;
-        }
-
         await _svc.createStaff(
           storeId: widget.storeId,
           name: name,
@@ -304,32 +333,94 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
 
+            const Text(
+              'Inventory',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 6),
             _permTile(
-              title: 'Inventory Access',
-              value: _inventoryAccess,
-              onChanged: (v) => setState(() => _inventoryAccess = v),
+              title: 'View Inventory',
+              value: _viewInventory,
+              onChanged: (v) => setState(() => _viewInventory = v),
             ),
             _permTile(
-              title: 'Sales / Add to Cart',
-              value: _salesAccess,
-              onChanged: (v) => setState(() => _salesAccess = v),
+              title: 'Add Stock',
+              value: _addStock,
+              onChanged: (v) => setState(() => _addStock = v),
             ),
             _permTile(
-              title: 'Transaction History',
-              value: _transactionHistoryAccess,
-              onChanged: (v) => setState(() => _transactionHistoryAccess = v),
+              title: 'Reduce Stock',
+              value: _reduceStock,
+              onChanged: (v) => setState(() => _reduceStock = v),
             ),
             _permTile(
-              title: 'Receipt Access',
-              value: _receiptAccess,
-              onChanged: (v) => setState(() => _receiptAccess = v),
+              title: 'Pull Out Stock',
+              value: _pullOutStock,
+              onChanged: (v) => setState(() => _pullOutStock = v),
+            ),
+
+            const SizedBox(height: 10),
+            const Text(
+              'Sales',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _permTile(
+              title: 'Process Sales',
+              value: _processSales,
+              onChanged: (v) => setState(() => _processSales = v),
             ),
             _permTile(
-              title: 'Profile Access',
-              value: _profileAccess,
-              onChanged: (v) => setState(() => _profileAccess = v),
+              title: 'Edit Cart',
+              value: _editCart,
+              onChanged: (v) => setState(() => _editCart = v),
+            ),
+
+            const SizedBox(height: 10),
+            const Text(
+              'Records',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _permTile(
+              title: 'View Transactions',
+              value: _viewTransactions,
+              onChanged: (v) => setState(() => _viewTransactions = v),
+            ),
+            _permTile(
+              title: 'View Receipts',
+              value: _viewReceipts,
+              onChanged: (v) => setState(() => _viewReceipts = v),
+            ),
+
+            const SizedBox(height: 10),
+            const Text(
+              'Account',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 6),
+            _permTile(
+              title: 'View Profile',
+              value: _viewProfile,
+              onChanged: (v) => setState(() => _viewProfile = v),
             ),
           ] else ...[
             Container(
@@ -375,17 +466,37 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
     required ValueChanged<bool> onChanged,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       decoration: BoxDecoration(
         color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: CheckboxListTile(
-        value: value,
-        onChanged: _saving ? null : (v) => onChanged(v ?? false),
-        title: Text(title),
-        controlAffinity: ListTileControlAffinity.leading,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Transform.scale(
+            scale: 0.88,
+            child: Checkbox(
+              value: value,
+              onChanged: _saving ? null : (v) => onChanged(v ?? false),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: const VisualDensity(
+                horizontal: -4,
+                vertical: -4,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

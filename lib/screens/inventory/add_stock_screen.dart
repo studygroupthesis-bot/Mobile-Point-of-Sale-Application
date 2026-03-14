@@ -37,6 +37,12 @@ class _AddStockScreenState extends State<AddStockScreen> {
     _contextFuture = _loadContext();
   }
 
+  static const Color _screenBg = Color(0xFFF0F4F6);
+  static const Color _surfaceFill = Color(0xFFF7F4F4);
+  static const Color _surfaceBorder = Color(0xFFD0D0D0);
+  static const Color _teal = Color(0xFF2AA39A);
+  static const String _gradientAsset = 'assets/Gradient.png';
+
   @override
   void dispose() {
     _quantityController.dispose();
@@ -291,72 +297,100 @@ class _AddStockScreenState extends State<AddStockScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final itemName = (widget.itemData['name'] ?? 'Unnamed Item').toString();
-    final currentStock = _currentStock();
+Widget build(BuildContext context) {
+  final itemName = (widget.itemData['name'] ?? 'Unnamed Item').toString();
+  final currentStock = _currentStock();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFD78383),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFD78383),
-        elevation: 0,
-        foregroundColor: Colors.white,
-        title: const Text('Add Stock'),
-      ),
-      body: SafeArea(
-        child: FutureBuilder<_AddStockContext>(
-          future: _contextFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+  return Scaffold(
+    backgroundColor: _screenBg,
+    body: SafeArea(
+      child: Stack(
+        children: [
+          Positioned(
+            left: -120,
+            top: -10,
+            child: _buildGradientBubble(size: 320),
+          ),
+          Positioned(
+            right: -125,
+            top: 420,
+            child: _buildGradientBubble(size: 280),
+          ),
+          Positioned(
+            left: -115,
+            bottom: -10,
+            child: _buildGradientBubble(size: 250),
+          ),
+          FutureBuilder<_AddStockContext>(
+            future: _contextFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-            if (snapshot.hasError) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'Error: ${snapshot.error}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white),
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'Error: ${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.black87),
+                    ),
                   ),
-                ),
-              );
-            }
+                );
+              }
 
-            final ctx = snapshot.data!;
+              final ctx = snapshot.data!;
 
-            return Container(
-              margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE6E6E6),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Form(
-                key: _formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
                     children: [
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon:
+                                const Icon(Icons.arrow_back, color: Colors.black),
+                          ),
+                          const Expanded(
+                            child: Center(
+                              child: Text(
+                                'Add Stock',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 48),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
                       Container(
-                        padding: const EdgeInsets.all(14),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: const Color(0xFFD8F0EC),
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(18),
                         ),
                         child: Row(
                           children: [
                             Container(
-                              width: 52,
-                              height: 52,
+                              width: 58,
+                              height: 58,
                               decoration: BoxDecoration(
                                 color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(16),
                               ),
                               child: const Icon(Icons.inventory_2_rounded),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 14),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -364,7 +398,7 @@ class _AddStockScreenState extends State<AddStockScreen> {
                                   Text(
                                     itemName,
                                     style: const TextStyle(
-                                      fontSize: 16,
+                                      fontSize: 17,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -382,15 +416,16 @@ class _AddStockScreenState extends State<AddStockScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 14),
+
+                      const SizedBox(height: 18),
                       _sectionTitle('Encoded By'),
                       const SizedBox(height: 8),
                       _infoTile(
                         title: ctx.encodedByName,
-                        subtitle:
-                            '${ctx.encodedByEmail} • ${ctx.encodedByRole}',
+                        subtitle: '${ctx.encodedByEmail} • ${ctx.encodedByRole}',
                       ),
-                      const SizedBox(height: 14),
+
+                      const SizedBox(height: 18),
                       _sectionTitle('Stock Details'),
                       const SizedBox(height: 8),
                       _inputField(
@@ -408,7 +443,7 @@ class _AddStockScreenState extends State<AddStockScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       _inputField(
                         controller: _costPriceController,
                         label: 'Cost Price per Unit',
@@ -416,7 +451,8 @@ class _AddStockScreenState extends State<AddStockScreen> {
                           decimal: true,
                         ),
                       ),
-                      const SizedBox(height: 14),
+
+                      const SizedBox(height: 18),
                       _sectionTitle('Dates'),
                       const SizedBox(height: 8),
                       _dateTile(
@@ -424,26 +460,36 @@ class _AddStockScreenState extends State<AddStockScreen> {
                         value: _formatDate(_receivedDate),
                         onTap: _pickReceivedDate,
                       ),
-                      const SizedBox(height: 10),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: _hasExpiry,
-                        activeColor: Colors.teal,
-                        title: const Text(
-                          'Has Expiry Date',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _hasExpiry = value;
-                            if (!value) {
-                              _expiryDate = null;
-                            }
-                          });
-                        },
+
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Has Expiry Date',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Switch(
+                            value: _hasExpiry,
+                            activeColor: _teal,
+                            onChanged: (value) {
+                              setState(() {
+                                _hasExpiry = value;
+                                if (!value) {
+                                  _expiryDate = null;
+                                }
+                              });
+                            },
+                          ),
+                        ],
                       ),
+
                       if (_hasExpiry) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         _dateTile(
                           label: 'Expiry Date',
                           value: _expiryDate == null
@@ -452,7 +498,8 @@ class _AddStockScreenState extends State<AddStockScreen> {
                           onTap: _pickExpiryDate,
                         ),
                       ],
-                      const SizedBox(height: 14),
+
+                      const SizedBox(height: 18),
                       _sectionTitle('Notes'),
                       const SizedBox(height: 8),
                       _inputField(
@@ -460,12 +507,14 @@ class _AddStockScreenState extends State<AddStockScreen> {
                         label: 'Notes',
                         maxLines: 4,
                       ),
-                      const SizedBox(height: 12),
+
+                      const SizedBox(height: 14),
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.82),
-                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.white.withOpacity(0.90),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _surfaceBorder),
                         ),
                         child: const Text(
                           'Batch Code and Stock In Code will be generated automatically when you save.',
@@ -475,18 +524,19 @@ class _AddStockScreenState extends State<AddStockScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+
+                      const SizedBox(height: 28),
                       SizedBox(
                         width: double.infinity,
-                        height: 46,
+                        height: 52,
                         child: ElevatedButton(
                           onPressed: _saving ? null : _saveStockIn,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF59B8AA),
+                            backgroundColor: _teal,
                             foregroundColor: Colors.white,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(18),
                             ),
                           ),
                           child: _saving
@@ -499,7 +549,7 @@ class _AddStockScreenState extends State<AddStockScreen> {
                                   ),
                                 )
                               : const Text(
-                                  'Save Stock In',
+                                  'SAVE STOCK IN',
                                   style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
@@ -510,24 +560,69 @@ class _AddStockScreenState extends State<AddStockScreen> {
                     ],
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+  Widget _buildGradientBubble({
+    required double size,
+  }) {
+    return IgnorePointer(
+      child: Opacity(
+        opacity: 0.68,
+        child: Image.asset(
+          _gradientAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
         ),
       ),
     );
   }
 
-  Widget _sectionTitle(String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w700,
-        color: Colors.black87,
+    InputDecoration _fieldDecoration({
+    required String hintText,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hintText,
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: _surfaceFill,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        hintStyle: const TextStyle(
+        color: Colors.grey,
+        fontSize: 15,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _surfaceBorder),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _surfaceBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _teal, width: 1.2),
       ),
     );
-  }
+  } 
+
+  Widget _sectionTitle(String text) {
+  return Text(
+    text,
+    style: const TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w700,
+      color: Colors.black87,
+    ),
+  );
+}
 
   Widget _infoTile({
     required String title,
@@ -535,10 +630,11 @@ class _AddStockScreenState extends State<AddStockScreen> {
   }) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.82),
-        borderRadius: BorderRadius.circular(12),
+        color: _surfaceFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _surfaceBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,19 +671,7 @@ class _AddStockScreenState extends State<AddStockScreen> {
       keyboardType: keyboardType,
       maxLines: maxLines,
       validator: validator,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.82),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
-        ),
-      ),
+      decoration: _fieldDecoration(hintText: label),
     );
   }
 
@@ -597,13 +681,14 @@ class _AddStockScreenState extends State<AddStockScreen> {
     required VoidCallback onTap,
   }) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.82),
-          borderRadius: BorderRadius.circular(12),
+          color: _surfaceFill,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _surfaceBorder),
         ),
         child: Row(
           children: [
