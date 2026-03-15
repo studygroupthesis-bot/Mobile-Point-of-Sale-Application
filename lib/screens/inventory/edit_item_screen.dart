@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../services/cloudinary_service.dart';
 import 'add_stock_screen.dart';
-import '../../screens/transaction/barcode_scanner_screen.dart';
+import 'barcode_scanner_screen.dart';
 
 enum SoldBy { each, weight }
 
