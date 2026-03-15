@@ -47,7 +47,8 @@ class _PopPayAppState extends State<PopPayApp> {
     }
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      stream:
+          FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -97,7 +98,6 @@ class _PopPayAppState extends State<PopPayApp> {
 
         final isAdmin = role == 'admin';
 
-        // Match these to your actual permission keys
         final canViewDashboard = isAdmin;
         final canViewHistory = isAdmin ||
             _permissionValue(permissions, [
@@ -124,7 +124,8 @@ class _PopPayAppState extends State<PopPayApp> {
               ? const DashboardScreen()
               : const AccessDeniedScreen(
                   title: 'Dashboard Restricted',
-                  message: 'Your account does not have access to the dashboard.',
+                  message:
+                      'Your account does not have access to the dashboard.',
                 ),
           canViewHistory
               ? const TransactionHistory()
@@ -134,7 +135,7 @@ class _PopPayAppState extends State<PopPayApp> {
                       'Your account does not have access to transaction history.',
                 ),
           canUseTransaction
-              ? const TransactionScreen()
+              ? TransactionScreen(isActive: currentIndex == 2)
               : const AccessDeniedScreen(
                   title: 'Sales Restricted',
                   message: 'Your account does not have access to sales.',

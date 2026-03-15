@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../services/receipt_share_service.dart';
@@ -39,22 +40,31 @@ class CartItem {
 }
 
 class TransactionScreen extends StatefulWidget {
-  const TransactionScreen({super.key});
+  final bool isActive;
+
+  const TransactionScreen({
+    super.key,
+    required this.isActive,
+  });
 
   @override
   State<TransactionScreen> createState() => _TransactionScreenState();
 }
 
-class _TransactionScreenState extends State<TransactionScreen> {
+class _TransactionScreenState extends State<TransactionScreen>
+    with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   final List<CartItem> _cart = [];
 
-  final MobileScannerController _scannerController = MobileScannerController();
+  final MobileScannerController _scannerController = MobileScannerController(
+    autoStart: false,
+  );
 
   bool _loadingAdd = false;
   bool _loadingSuggest = false;
   bool _processingCheckout = false;
   bool _scannerBusy = false;
+  bool _scannerStarted = false;
 
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _suggestions = [];
   String _lastQuery = '';
@@ -63,10 +73,74 @@ class _TransactionScreenState extends State<TransactionScreen> {
   DateTime? _lastScannedAt;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _syncScannerState();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant TransactionScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.isActive != widget.isActive) {
+      _syncScannerState();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncScannerState();
+    } else {
+      _safeStopScanner();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  Future<void> _safeStartScanner() async {
+    if (!mounted || !widget.isActive) return;
+    if (_scannerStarted) return;
+    if (_processingCheckout) return;
+
+    try {
+      await _scannerController.start();
+      _scannerStarted = true;
+    } catch (e) {
+      debugPrint('SCANNER START ERROR: $e');
+    }
+  }
+
+  Future<void> _safeStopScanner() async {
+    if (!_scannerStarted) return;
+
+    try {
+      await _scannerController.stop();
+    } catch (e) {
+      debugPrint('SCANNER STOP ERROR: $e');
+    } finally {
+      _scannerStarted = false;
+    }
+  }
+
+  Future<void> _syncScannerState() async {
+    if (!mounted) return;
+
+    if (widget.isActive && !_processingCheckout) {
+      await _safeStartScanner();
+    } else {
+      await _safeStopScanner();
+    }
   }
 
   String _makeInvoiceNo(String docId) {
@@ -350,6 +424,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
   Future<void> _openBarcodeInputDialog() async {
     final controller = TextEditingController();
 
+    await _safeStopScanner();
+
     final code = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -377,11 +453,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     controller.dispose();
 
+    if (mounted && widget.isActive) {
+      await _safeStartScanner();
+    }
+
     if (code == null || code.trim().isEmpty) return;
     await _addItemByBarcode(code.trim(), showScannedDialog: false);
   }
 
   Future<void> _handleEmbeddedScan(BarcodeCapture capture) async {
+    if (!widget.isActive) return;
     if (_scannerBusy || _loadingAdd || _processingCheckout) return;
 
     final codes = capture.barcodes;
@@ -393,14 +474,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
     if (_isRapidDuplicate(value)) return;
 
     _scannerBusy = true;
-    await _scannerController.stop();
+    await _safeStopScanner();
 
     try {
       await _addItemByBarcode(value, showScannedDialog: true);
     } finally {
-      if (mounted) {
-        _scannerBusy = false;
-        await _scannerController.start();
+      _scannerBusy = false;
+      if (mounted && widget.isActive && !_processingCheckout) {
+        await _safeStartScanner();
       }
     }
   }
@@ -579,6 +660,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     if (mounted) {
       setState(() => _processingCheckout = false);
+      _syncScannerState();
     }
   }
 
@@ -861,6 +943,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       if (!mounted) return;
 
+      await _safeStopScanner();
+
       setState(() {
         _cart.clear();
         _suggestions = [];
@@ -880,6 +964,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
           ),
         ),
       );
+
+      if (mounted && widget.isActive) {
+        await _safeStartScanner();
+      }
     } on FirebaseException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -894,86 +982,96 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Widget _buildScannerCard() {
-    return GestureDetector(
-      onTap: () async {
-        if (_loadingAdd || _processingCheckout || _scannerBusy) return;
-        await _scannerController.start();
-      },
-      child: Container(
-        height: 130,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
+    return Container(
+      height: 130,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (widget.isActive)
               MobileScanner(
                 controller: _scannerController,
                 onDetect: _handleEmbeddedScan,
-              ),
-              Center(
-                child: Container(
-                  width: 220,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white, width: 2.5),
-                    borderRadius: BorderRadius.circular(12),
+              )
+            else
+              Container(
+                color: Colors.black,
+                alignment: Alignment.center,
+                child: const Text(
+                  'Scanner paused',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
-              if (_loadingAdd || _scannerBusy)
-                Container(
-                  color: Colors.black26,
-                  alignment: Alignment.center,
-                  child: const SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
-                      color: Colors.white,
-                    ),
-                  ),
+            Center(
+              child: Container(
+                width: 220,
+                height: 70,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white, width: 2.5),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _loadingAdd
-                        ? 'Looking up scanned item...'
-                        : _scannerBusy
-                            ? 'Processing scan...'
-                            : 'Align barcode inside the frame',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
+              ),
+            ),
+            if (_loadingAdd || _scannerBusy)
+              Container(
+                color: Colors.black26,
+                alignment: Alignment.center,
+                child: const SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: Colors.white,
                   ),
                 ),
               ),
-            ],
-          ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  !widget.isActive
+                      ? 'Scanner is active only on the Transaction tab'
+                      : _loadingAdd
+                          ? 'Looking up scanned item...'
+                          : _scannerBusy
+                              ? 'Processing scan...'
+                              : 'Align barcode inside the frame',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
