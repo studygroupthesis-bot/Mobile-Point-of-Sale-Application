@@ -147,8 +147,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       throw Exception('Not logged in. Please login again.');
     }
 
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
