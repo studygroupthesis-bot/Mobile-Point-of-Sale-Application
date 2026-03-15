@@ -165,7 +165,7 @@ class ReceiptScreen extends StatelessWidget {
                   width: 54,
                   height: 54,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.6),
+                    color: Colors.white.withValues(alpha: 0.6),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
@@ -182,11 +182,11 @@ class ReceiptScreen extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.92),
+                      color: Colors.white.withValues(alpha: 0.92),
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
+                          color: Colors.black.withValues(alpha: 0.08),
                           blurRadius: 14,
                           offset: const Offset(0, 8),
                         ),
@@ -229,8 +229,8 @@ class ReceiptScreen extends StatelessWidget {
                         const SizedBox(height: 10),
                         const Divider(height: 1),
                         const SizedBox(height: 10),
-                        Row(
-                          children: const [
+                        const Row(
+                          children: [
                             Expanded(
                               flex: 4,
                               child: Text(

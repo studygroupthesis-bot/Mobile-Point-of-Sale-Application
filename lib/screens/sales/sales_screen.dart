@@ -265,7 +265,7 @@ class _SalesScreenState extends State<SalesScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(14),
         boxShadow: const [
           BoxShadow(blurRadius: 18, offset: Offset(0, 10), color: Color(0x12000000)),
@@ -339,7 +339,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(14),
       ),
       child: ListTile(

@@ -239,12 +239,12 @@ class _IntroScreenState extends State<IntroScreen>
                                 child: Container(
                                   width: 190,
                                   height: 190,
-                                  decoration: BoxDecoration(
+                                  decoration: const BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: const Color(0x3359D0C3),
+                                    color: Color(0x3359D0C3),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: const Color(0x6659D0C3),
+                                        color: Color(0x6659D0C3),
                                         blurRadius: 40,
                                         spreadRadius: 6,
                                       ),
@@ -257,7 +257,7 @@ class _IntroScreenState extends State<IntroScreen>
                                 height: 170,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  color: Colors.white.withOpacity(0.25),
+                                  color: Colors.white.withValues(alpha: 0.25),
                                 ),
                                 child: Padding(
                                   padding: const EdgeInsets.all(14),
@@ -350,7 +350,7 @@ class _IntroScreenState extends State<IntroScreen>
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.35),
+            color: color.withValues(alpha: 0.35),
             blurRadius: 90,
             spreadRadius: 20,
           ),

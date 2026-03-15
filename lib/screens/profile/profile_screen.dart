@@ -34,10 +34,10 @@ class ProfileScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               /// BACK BUTTON + TITLE
-              Row(
+              const Row(
                 children: [
-                  const SizedBox(width: 5),
-                  const Text(
+                  SizedBox(width: 5),
+                  Text(
                     "My Business",
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),

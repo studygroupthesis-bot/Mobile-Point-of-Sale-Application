@@ -622,7 +622,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
             throw Exception('Item "${cartItem.name}" no longer exists.');
           }
 
-          final data = itemSnap.data() as Map<String, dynamic>? ?? {};
+          final data = itemSnap.data() ?? {};
           final currentStock = _safeToInt(data['stockQty']);
 
           if (currentStock < cartItem.qty) {
@@ -760,7 +760,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -905,7 +905,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
+                          color: Colors.black.withValues(alpha: 0.06),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),

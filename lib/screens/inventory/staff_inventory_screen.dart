@@ -425,9 +425,9 @@ class _EmployeeInventoryScreenState extends State<EmployeeInventoryScreen> {
                           alignment: Alignment.center,
                           clipBehavior: Clip.none,
                           children: [
-                            Row(
+                            const Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: const [
+                              children: [
                                 Icon(Icons.home_outlined,
                                     color: Colors.white, size: 28),
                                 Icon(Icons.receipt_long_outlined,

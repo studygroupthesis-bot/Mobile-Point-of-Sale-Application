@@ -475,7 +475,7 @@ Widget build(BuildContext context) {
                           ),
                           Switch(
                             value: _hasExpiry,
-                            activeColor: _teal,
+                            activeThumbColor: _teal,
                             onChanged: (value) {
                               setState(() {
                                 _hasExpiry = value;
@@ -512,7 +512,7 @@ Widget build(BuildContext context) {
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.90),
+                          color: Colors.white.withValues(alpha: 0.90),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(color: _surfaceBorder),
                         ),

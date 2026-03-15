@@ -313,7 +313,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             Container(
                               height: 42,
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.70),
+                                color: Colors.white.withValues(alpha: 0.70),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: TextField(

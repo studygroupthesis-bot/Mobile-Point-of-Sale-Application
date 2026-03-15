@@ -163,7 +163,7 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                   margin: const EdgeInsets.all(16),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Text(
@@ -341,7 +341,7 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                                   return Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.92),
+                                      color: Colors.white.withValues(alpha: 0.92),
                                       borderRadius: BorderRadius.circular(14),
                                       boxShadow: const [
                                         BoxShadow(
