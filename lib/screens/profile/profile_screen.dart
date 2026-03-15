@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'account_settings_screen.dart';
-import 'manage_users_screen.dart'; // ✅ this should be your LIST screen
+import 'manage_users_screen.dart';
 import 'store_settings_screen.dart';
 import 'data_sync_screen.dart';
 import '../auth/login_screen.dart';
@@ -33,7 +33,6 @@ class ProfileScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              /// BACK BUTTON + TITLE
               Row(
                 children: [
                   const SizedBox(width: 5),
@@ -44,8 +43,6 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
-
-              /// MAIN CARD
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -62,11 +59,8 @@ class ProfileScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /// BUSINESS HEADER
                     _StoreHeader(uid: uid),
                     const SizedBox(height: 25),
-
-                    /// ACCOUNT SETTINGS
                     _menuItem(
                       icon: Icons.settings,
                       title: "Account Settings",
@@ -79,8 +73,6 @@ class ProfileScreen extends StatelessWidget {
                         );
                       },
                     ),
-
-                    /// MANAGE USERS (Admin only)
                     if (uid != null)
                       StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                         stream: FirebaseFirestore.instance
@@ -107,8 +99,6 @@ class ProfileScreen extends StatelessWidget {
                           );
                         },
                       ),
-
-                    /// STORE SETTINGS
                     _menuItem(
                       icon: Icons.store_mall_directory,
                       title: "Store Settings",
@@ -121,8 +111,6 @@ class ProfileScreen extends StatelessWidget {
                         );
                       },
                     ),
-
-                    /// DATA SYNC
                     _menuItem(
                       icon: Icons.cloud_sync,
                       title: "Data Sync",
@@ -135,10 +123,7 @@ class ProfileScreen extends StatelessWidget {
                         );
                       },
                     ),
-
                     const SizedBox(height: 20),
-
-                    /// SIGN OUT BUTTON
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -208,7 +193,6 @@ class _StoreHeader extends StatelessWidget {
         final storeId = userData?["storeId"] as String?;
 
         if (storeId == null || storeId.isEmpty) {
-          // fallback (if you kept business_name inside users before)
           final fallback =
               (userData?["business_name"] as String?) ?? "My Business";
           return _headerRow(name: fallback, logoUrl: null);

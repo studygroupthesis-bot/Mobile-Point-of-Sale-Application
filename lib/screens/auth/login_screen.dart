@@ -139,14 +139,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       SizedBox(height: isSmallPhone ? 16 : 20),
-
                       Image.asset(
                         "assets/logo&name.png",
                         height: logoHeight,
                       ),
-
                       SizedBox(height: isSmallPhone ? 20 : 30),
-
                       Expanded(
                         child: Container(
                           width: double.infinity,
@@ -180,9 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 hintText: "example@gmail.com",
                                 icon: Icons.email,
                               ),
-
                               const SizedBox(height: 18),
-
                               const Text(
                                 "Password",
                                 style: TextStyle(color: Colors.white),
@@ -195,9 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 icon: Icons.lock,
                                 isPassword: true,
                               ),
-
                               const SizedBox(height: 10),
-
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
@@ -208,9 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
                               ),
-
                               const SizedBox(height: 10),
-
                               Center(
                                 child: SizedBox(
                                   width: loginButtonWidth,
@@ -242,25 +233,24 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
                               ),
-
                               const SizedBox(height: 20),
-
                               const Row(
                                 children: [
-                                  Expanded(child: Divider(color: Colors.white54)),
+                                  Expanded(
+                                      child: Divider(color: Colors.white54)),
                                   Padding(
-                                    padding: EdgeInsets.symmetric(horizontal: 10),
+                                    padding:
+                                        EdgeInsets.symmetric(horizontal: 10),
                                     child: Text(
                                       "OR",
                                       style: TextStyle(color: Colors.white),
                                     ),
                                   ),
-                                  Expanded(child: Divider(color: Colors.white54)),
+                                  Expanded(
+                                      child: Divider(color: Colors.white54)),
                                 ],
                               ),
-
                               const SizedBox(height: 20),
-
                               Center(
                                 child: GestureDetector(
                                   onTap: () {
@@ -272,9 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
                               ),
-
                               const SizedBox(height: 25),
-
                               Center(
                                 child: GestureDetector(
                                   onTap: () => Navigator.pushReplacement(
@@ -290,7 +278,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
                               ),
-
                               const Spacer(),
                             ],
                           ),

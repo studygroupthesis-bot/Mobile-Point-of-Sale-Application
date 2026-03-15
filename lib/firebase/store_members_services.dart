@@ -20,12 +20,12 @@ class StoreMembersService {
     return _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .orderBy('name')
         .snapshots();
   }
 
-  /// ✅ Admin creates staff auth account WITHOUT logging out admin (secondary app)
+  /// Admin creates staff auth account WITHOUT logging out admin (secondary app)
   Future<void> createStaff({
     required String storeId,
     required String name,
@@ -33,9 +33,8 @@ class StoreMembersService {
     required String password,
     required String phone,
     required String role, // "staff" or "admin"
-    required Map<String, dynamic> permissions, 
+    required Map<String, dynamic> permissions,
   }) async {
-    // Create / reuse secondary Firebase app
     FirebaseApp secondary;
     try {
       secondary = Firebase.app('secondary');
@@ -48,7 +47,6 @@ class StoreMembersService {
 
     final secondaryAuth = FirebaseAuth.instanceFor(app: secondary);
 
-    // Create auth user on secondary auth
     final cred = await secondaryAuth.createUserWithEmailAndPassword(
       email: email.trim(),
       password: password.trim(),
@@ -56,12 +54,12 @@ class StoreMembersService {
 
     final newUid = cred.user!.uid;
 
-    // Sign out secondary (keeps admin session intact)
+    // Sign out secondary so admin stays logged in
     await secondaryAuth.signOut();
 
     final now = FieldValue.serverTimestamp();
 
-    // 1) user profile doc (global)
+    // 1) Global user profile doc
     await _db.collection('users').doc(newUid).set({
       'uid': newUid,
       'storeId': storeId,
@@ -69,17 +67,17 @@ class StoreMembersService {
       'email': email.trim(),
       'phone': phone.trim(),
       'role': role,
-      'permissions':permissions,
-      'isActive': true, 
+      'permissions': permissions,
+      'isActive': true,
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
 
-    // 2) store members list (for fast querying per store)
+    // 2) Store staff list
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(newUid)
         .set({
       'uid': newUid,
@@ -88,7 +86,7 @@ class StoreMembersService {
       'phone': phone.trim(),
       'role': role,
       'permissions': permissions,
-      'isActive': true, 
+      'isActive': true,
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
@@ -100,21 +98,21 @@ class StoreMembersService {
     required String name,
     required String phone,
     required String role,
-    required Map<String, dynamic> permissions, 
+    required Map<String, dynamic> permissions,
   }) async {
     final now = FieldValue.serverTimestamp();
 
-    // Update store member
+    // Update store staff doc
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(uid)
         .set({
       'name': name.trim(),
       'phone': phone.trim(),
       'role': role,
-      'permissions': permissions, 
+      'permissions': permissions,
       'updated_at': now,
     }, SetOptions(merge: true));
 
@@ -132,12 +130,12 @@ class StoreMembersService {
     required String storeId,
     required String uid,
   }) async {
-    // NOTE: This removes Firestore membership only.
+    // Removes Firestore store staff record only.
     // Deleting FirebaseAuth user requires Admin SDK / Cloud Function.
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(uid)
         .delete();
   }
