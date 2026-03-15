@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
-  const BarcodeScannerScreen({super.key});
+  final String title;
+
+  const BarcodeScannerScreen({
+    super.key,
+    this.title = 'Scan Barcode',
+  });
 
   @override
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
@@ -18,14 +23,14 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     final codes = capture.barcodes;
     if (codes.isEmpty) return;
 
-    final value = codes.first.rawValue;
-    if (value == null || value.trim().isEmpty) return;
+    final value = codes.first.rawValue?.trim();
+    if (value == null || value.isEmpty) return;
 
     _handled = true;
     await _controller.stop();
 
     if (!mounted) return;
-    Navigator.of(context).pop(value.trim());
+    Navigator.of(context).pop(value);
   }
 
   @override
@@ -66,10 +71,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Scan Barcode',
-                style: TextStyle(
+                widget.title,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w700,

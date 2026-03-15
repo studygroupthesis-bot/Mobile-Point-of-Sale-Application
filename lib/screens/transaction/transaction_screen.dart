@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
-import 'barcode_scanner_screen.dart';
 import 'receipt_screen.dart';
 
 class StorePaymentConfig {
@@ -48,16 +48,23 @@ class _TransactionScreenState extends State<TransactionScreen> {
   final _searchController = TextEditingController();
   final List<CartItem> _cart = [];
 
+  final MobileScannerController _scannerController = MobileScannerController();
+
   bool _loadingAdd = false;
   bool _loadingSuggest = false;
   bool _processingCheckout = false;
+  bool _scannerBusy = false;
 
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _suggestions = [];
   String _lastQuery = '';
 
+  String? _lastScannedCode;
+  DateTime? _lastScannedAt;
+
   @override
   void dispose() {
     _searchController.dispose();
+    _scannerController.dispose();
     super.dispose();
   }
 
@@ -94,6 +101,28 @@ class _TransactionScreenState extends State<TransactionScreen> {
   double get subtotal => _cart.fold(0, (t, i) => t + i.total);
   double get vat12 => subtotal * 0.12;
   double get grandTotal => subtotal + vat12;
+
+  void _resetSearchUi() {
+    _searchController.clear();
+    setState(() {
+      _suggestions = [];
+      _lastQuery = '';
+    });
+  }
+
+  bool _isRapidDuplicate(String code) {
+    final now = DateTime.now();
+
+    if (_lastScannedCode == code &&
+        _lastScannedAt != null &&
+        now.difference(_lastScannedAt!) < const Duration(seconds: 2)) {
+      return true;
+    }
+
+    _lastScannedCode = code;
+    _lastScannedAt = now;
+    return false;
+  }
 
   void _addOrMergeCartItem({
     required String itemId,
@@ -133,6 +162,66 @@ class _TransactionScreenState extends State<TransactionScreen> {
           children: [
             Text('Add quantity for:\n$itemName'),
             const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Quantity',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final q = int.tryParse(controller.text.trim());
+              if (q == null || q <= 0) return;
+              Navigator.pop(ctx, q);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+    return qty;
+  }
+
+  Future<int?> _askScannedItemQuantity({
+    required String itemName,
+    required double price,
+    String? barcode,
+  }) async {
+    final controller = TextEditingController(text: '1');
+
+    final qty = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Scanned Item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              itemName,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text('Price: ₱ ${price.toStringAsFixed(2)}'),
+            if (barcode != null && barcode.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Barcode: $barcode',
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ],
+            const SizedBox(height: 14),
             TextField(
               controller: controller,
               keyboardType: TextInputType.number,
@@ -254,11 +343,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       barcode: barcode,
     );
 
-    _searchController.clear();
-    setState(() {
-      _suggestions = [];
-      _lastQuery = '';
-    });
+    _resetSearchUi();
   }
 
   Future<void> _openBarcodeInputDialog() async {
@@ -292,25 +377,37 @@ class _TransactionScreenState extends State<TransactionScreen> {
     controller.dispose();
 
     if (code == null || code.trim().isEmpty) return;
-    await _addItemByBarcode(code.trim());
+    await _addItemByBarcode(code.trim(), showScannedDialog: false);
   }
 
-  Future<void> _openBarcodeScannerCamera() async {
-    if (_loadingAdd || _processingCheckout) return;
+  Future<void> _handleEmbeddedScan(BarcodeCapture capture) async {
+    if (_scannerBusy || _loadingAdd || _processingCheckout) return;
 
-    final code = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => const BarcodeScannerScreen(),
-      ),
-    );
+    final codes = capture.barcodes;
+    if (codes.isEmpty) return;
 
-    if (!mounted) return;
-    if (code == null || code.trim().isEmpty) return;
+    final value = codes.first.rawValue?.trim();
+    if (value == null || value.isEmpty) return;
 
-    await _addItemByBarcode(code.trim());
+    if (_isRapidDuplicate(value)) return;
+
+    _scannerBusy = true;
+    await _scannerController.stop();
+
+    try {
+      await _addItemByBarcode(value, showScannedDialog: true);
+    } finally {
+      if (mounted) {
+        _scannerBusy = false;
+        await _scannerController.start();
+      }
+    }
   }
 
-  Future<void> _addItemByBarcode(String barcode) async {
+  Future<void> _addItemByBarcode(
+    String barcode, {
+    required bool showScannedDialog,
+  }) async {
     setState(() => _loadingAdd = true);
 
     try {
@@ -332,7 +429,31 @@ class _TransactionScreenState extends State<TransactionScreen> {
         return;
       }
 
-      await _addFromDoc(q.docs.first);
+      final doc = q.docs.first;
+      final d = doc.data();
+      final name = (d['name'] ?? '').toString();
+      final price = (d['price'] as num?)?.toDouble() ?? 0.0;
+      final savedBarcode = (d['barcode'] ?? '').toString();
+
+      final qty = showScannedDialog
+          ? await _askScannedItemQuantity(
+              itemName: name,
+              price: price,
+              barcode: savedBarcode,
+            )
+          : await _askQuantity(itemName: name);
+
+      if (qty == null) return;
+
+      _addOrMergeCartItem(
+        itemId: doc.id,
+        name: name,
+        price: price,
+        qty: qty,
+        barcode: savedBarcode,
+      );
+
+      _resetSearchUi();
     } catch (e) {
       debugPrint('BARCODE ERROR: $e');
       if (!mounted) return;
@@ -752,9 +873,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Widget _buildScannerCard() {
     return GestureDetector(
-      onTap: _openBarcodeScannerCamera,
+      onTap: () async {
+        if (_loadingAdd || _processingCheckout || _scannerBusy) return;
+        await _scannerController.start();
+      },
       child: Container(
-        height: 110,
+        height: 130,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -766,52 +890,68 @@ class _TransactionScreenState extends State<TransactionScreen> {
             ),
           ],
         ),
-        child: Center(
-          child: _loadingAdd
-              ? const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      'Looking up scanned barcode...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                      ),
-                    ),
-                  ],
-                )
-              : const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.qr_code_scanner_rounded,
-                      size: 38,
-                      color: Color(0xFF00A88B),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Tap to scan barcode',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Opens camera scanner',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                      ),
-                    ),
-                  ],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              MobileScanner(
+                controller: _scannerController,
+                onDetect: _handleEmbeddedScan,
+              ),
+              Center(
+                child: Container(
+                  width: 220,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white, width: 2.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
+              ),
+              if (_loadingAdd || _scannerBusy)
+                Container(
+                  color: Colors.black26,
+                  alignment: Alignment.center,
+                  child: const SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _loadingAdd
+                        ? 'Looking up scanned item...'
+                        : _scannerBusy
+                            ? 'Processing scan...'
+                            : 'Align barcode inside the frame',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
