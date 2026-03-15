@@ -4,7 +4,8 @@ import 'package:device_preview/device_preview.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'firebase/firebase_options.dart';
-import 'screens/auth/intro_screen.dart';
+import 'screens/auth/login_screen.dart'; // ⬅ import login screen
+// import 'app/app.dart';  // temporarily disable until after login
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,6 +13,8 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  print("Firebase apps count: ${Firebase.apps.length}");
 
   runApp(
     DevicePreview(
@@ -34,7 +37,7 @@ class PopPayRoot extends StatelessWidget {
       theme: ThemeData(
         fontFamily: 'Inter',
       ),
-      home: const IntroScreen(),
+      home: const LoginScreen(), // ⬅ LOGIN NOW LOADS FIRST
     );
   }
 }

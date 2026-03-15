@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import '../../firebase/store_members_services.dart';
+import '../../firebase/store_staff_services.dart';
 import 'manage_user_form_screen.dart';
 
 class ManageUsersScreen extends StatefulWidget {

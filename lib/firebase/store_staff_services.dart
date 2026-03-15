@@ -20,7 +20,7 @@ class StoreMembersService {
     return _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .orderBy('name')
         .snapshots();
   }
@@ -75,11 +75,11 @@ class StoreMembersService {
       'updated_at': now,
     }, SetOptions(merge: true));
 
-    // 2) store members list (for fast querying per store)
+    // 2) store staff list (for fast querying per store)
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(newUid)
         .set({
       'uid': newUid,
@@ -108,7 +108,7 @@ class StoreMembersService {
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(uid)
         .set({
       'name': name.trim(),
@@ -132,12 +132,12 @@ class StoreMembersService {
     required String storeId,
     required String uid,
   }) async {
-    // NOTE: This removes Firestore membership only.
+    // NOTE: This removes Firestore staffhip only.
     // Deleting FirebaseAuth user requires Admin SDK / Cloud Function.
     await _db
         .collection('stores')
         .doc(storeId)
-        .collection('members')
+        .collection('staff')
         .doc(uid)
         .delete();
   }

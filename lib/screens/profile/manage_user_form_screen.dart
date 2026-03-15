@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import '../../firebase/store_members_services.dart';
+import '../../firebase/store_staff_services.dart';
 
 class AddEditUserScreen extends StatefulWidget {
   final String storeId;
@@ -59,7 +59,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
     return FirebaseFirestore.instance
         .collection('stores')
         .doc(widget.storeId)
-        .collection('members')
+        .collection('staff')
         .doc(widget.memberUid!)
         .snapshots();
   }

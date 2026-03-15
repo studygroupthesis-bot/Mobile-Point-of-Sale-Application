@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../services/cloudinary_service.dart';
 import 'add_stock_screen.dart';
+import '../../screens/transaction/barcode_scanner_screen.dart';
 
 enum SoldBy { each, weight }
 
@@ -341,6 +342,57 @@ class _EditItemScreenState extends State<EditItemScreen> {
     return null;
   }
 
+  String _normalizeBarcode(String value) {
+    return value.trim();
+  }
+
+  Future<void> _scanBarcodeIntoField() async {
+    if (saving) return;
+
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => const BarcodeScannerScreen(),
+      ),
+    );
+
+    if (!mounted || code == null) return;
+
+    final normalized = _normalizeBarcode(code);
+    if (normalized.isEmpty) return;
+
+    setState(() {
+      barcode.text = normalized;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Barcode captured: $normalized')),
+    );
+  }
+
+  Future<bool> _barcodeExistsInStore({
+    required String storeId,
+    required String barcodeValue,
+    required String ignoreItemId,
+  }) async {
+    if (barcodeValue.isEmpty) return false;
+
+    final snap = await FirebaseFirestore.instance
+        .collection('stores')
+        .doc(storeId)
+        .collection('items')
+        .where('barcode', isEqualTo: barcodeValue)
+        .limit(10)
+        .get();
+
+    for (final doc in snap.docs) {
+      if (doc.id != ignoreItemId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   Future<void> updateItem() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -355,6 +407,26 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
     try {
       final storeId = _storeId ?? await _requireStoreId();
+      final barcodeValue = _normalizeBarcode(barcode.text);
+
+      if (barcodeValue.isNotEmpty) {
+        final exists = await _barcodeExistsInStore(
+          storeId: storeId,
+          barcodeValue: barcodeValue,
+          ignoreItemId: widget.itemId,
+        );
+
+        if (exists) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Barcode already exists for another item.'),
+            ),
+          );
+          return;
+        }
+      }
+
       final uploaded = await _uploadImageIfNeeded();
 
       final updateData = <String, dynamic>{
@@ -363,7 +435,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'category': category.text.trim(),
         'price': double.tryParse(price.text.trim()) ?? 0,
         'cost': double.tryParse(cost.text.trim()) ?? 0,
-        'barcode': barcode.text.trim(),
+        'barcode': barcodeValue,
         'soldBy': soldBy == SoldBy.each ? 'each' : 'weight',
         'trackStock': true,
         'stockQty': int.tryParse(stockQty.text.trim()) ?? 0,
@@ -870,6 +942,48 @@ class _EditItemScreenState extends State<EditItemScreen> {
     );
   }
 
+  Widget _buildBarcodeField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel('Barcode'),
+        TextFormField(
+          controller: barcode,
+          decoration: _fieldDecoration(
+            hintText: 'Scan or enter barcode',
+            suffixIcon: SizedBox(
+              width: 96,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Scan barcode',
+                    onPressed: _scanBarcodeIntoField,
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Clear barcode',
+                    onPressed: () {
+                      setState(() {
+                        barcode.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Optional, but barcode should be unique per item.',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+
   Widget _buildStockActionSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -910,151 +1024,91 @@ class _EditItemScreenState extends State<EditItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F6),
+      appBar: AppBar(
+        title: const Text("Edit Item"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete, color: Colors.red),
+            onPressed: deleteItem,
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned(
-              left: -120,
-              top: -10,
-              child: _buildGradientBubble(size: 320),
-            ),
-            Positioned(
-              right: -125,
-              top: 420,
-              child: _buildGradientBubble(size: 280),
-            ),
-            Positioned(
-              left: -115,
-              bottom: -10,
-              child: _buildGradientBubble(size: 250),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
-              child: Form(
-                key: _formKey,
-                child: ListView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              children: [
+                const SizedBox(height: 8),
+                Center(child: _buildPreviewCircle()),
+                const SizedBox(height: 28),
+                _buildLabel('Product Name'),
+                TextFormField(
+                  controller: name,
+                  decoration: _fieldDecoration(
+                    hintText: 'Product Name',
+                    suffixIcon: const Icon(Icons.edit_outlined, size: 18),
+                  ),
+                  validator: (v) => _validateRequired(v, 'Product Name'),
+                ),
+                const SizedBox(height: 14),
+                _buildCategoryField(),
+                const SizedBox(height: 14),
+                _buildLabel('Sold by'),
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon:
-                              const Icon(Icons.arrow_back, color: Colors.black),
-                        ),
-                        const Expanded(
-                          child: Center(
-                            child: Text(
-                              'Edit Item',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: deleteItem,
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Center(child: _buildPreviewCircle()),
-                    const SizedBox(height: 34),
-                    _buildLabel('Product Name'),
-                    TextFormField(
-                      controller: name,
-                      decoration: _fieldDecoration(
-                        hintText: 'Product Name',
-                        suffixIcon: const Icon(Icons.edit_outlined, size: 18),
-                      ),
-                      validator: (v) => _validateRequired(v, 'Product Name'),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildCategoryField(),
-                    const SizedBox(height: 14),
-                    _buildLabel('Sold by'),
-                    Row(
-                      children: [
-                        _buildSoldByOption(
-                          label: 'Each',
-                          value: SoldBy.each,
-                        ),
-                        const SizedBox(width: 34),
-                        _buildSoldByOption(
-                          label: 'Weight',
-                          value: SoldBy.weight,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    _buildLabel('Barcode'),
-                    TextFormField(
-                      controller: barcode,
-                      decoration: _fieldDecoration(
-                        hintText: 'Barcode',
-                        suffixIcon: const Icon(Icons.qr_code_2_rounded),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildStockActionSection(),
-                    const SizedBox(height: 14),
-                    _buildLabel('Selling Price'),
-                    TextFormField(
-                      controller: price,
-                      decoration: _fieldDecoration(hintText: 'Price'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      validator: (v) => _validateMoney(v, 'Selling Price'),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildLabel('Cost'),
-                    TextFormField(
-                      controller: cost,
-                      decoration: _fieldDecoration(hintText: 'Cost'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      validator: (v) => _validateMoney(v, 'Cost'),
-                    ),
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: saving ? null : updateItem,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2AA39A),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                        child: saving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'SAVE CHANGES',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                      ),
-                    ),
+                    _buildSoldByOption(label: 'Each', value: SoldBy.each),
+                    const SizedBox(width: 34),
+                    _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
                   ],
                 ),
-              ),
+                const SizedBox(height: 14),
+                _buildLabel('Selling Price'),
+                TextFormField(
+                  controller: price,
+                  decoration: _fieldDecoration(hintText: 'Price'),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) => _validateMoney(v, 'Selling Price'),
+                ),
+                const SizedBox(height: 14),
+                _buildLabel('Cost'),
+                TextFormField(
+                  controller: cost,
+                  decoration: _fieldDecoration(hintText: 'Cost'),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) => _validateMoney(v, 'Cost'),
+                ),
+                const SizedBox(height: 14),
+                _buildLabel('Barcode'),
+                TextFormField(
+                  controller: barcode,
+                  decoration: _fieldDecoration(
+                    hintText: '',
+                    suffixIcon: const Icon(Icons.qr_code_2_rounded),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _buildStockActionSection(),
+                const SizedBox(height: 28),
+                SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: saving ? null : updateItem,
+                    child: saving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text("SAVE CHANGES"),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
