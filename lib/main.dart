@@ -4,21 +4,14 @@ import 'package:device_preview/device_preview.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'firebase/firebase_options.dart';
-import 'screens/auth/login_screen.dart';
+import 'screens/auth/intro_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Reuse existing default app if Android already created it.
-  if (Firebase.apps.isEmpty) {
-    if (kIsWeb) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    } else {
-      await Firebase.initializeApp();
-    }
-  }
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   runApp(
     DevicePreview(
@@ -35,9 +28,13 @@ class PopPayRoot extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       useInheritedMediaQuery: true,
+      builder: DevicePreview.appBuilder,
+      locale: DevicePreview.locale(context),
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(fontFamily: 'Inter'),
-      home: const LoginScreen(),
+      theme: ThemeData(
+        fontFamily: 'Inter',
+      ),
+      home: const IntroScreen(),
     );
   }
 }

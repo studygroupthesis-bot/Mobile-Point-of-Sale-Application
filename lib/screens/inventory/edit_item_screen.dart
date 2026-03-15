@@ -8,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../services/cloudinary_service.dart';
 import 'add_stock_screen.dart';
-import 'barcode_scanner_screen.dart';
 
 enum SoldBy { each, weight }
 
@@ -53,8 +52,9 @@ class _EditItemScreenState extends State<EditItemScreen> {
   List<String> _savedCategories = [];
 
   static const Color _teal = Color(0xFF0C7C86);
-  static const Color _fieldFill = Color(0xFFE6E6E6);
+  static const Color _fieldFill = Color(0xFFF7F4F4);
   static const Color _fieldBorder = Color(0xFFD0D0D0);
+  static const String _gradientAsset = 'assets/Gradient.png';
 
   final colors = const [
     Colors.grey,
@@ -74,11 +74,11 @@ class _EditItemScreenState extends State<EditItemScreen> {
     super.initState();
     final d = widget.itemData;
 
-    name = TextEditingController(text: d['name'] ?? '');
-    category = TextEditingController(text: d['category'] ?? '');
+    name = TextEditingController(text: d['name']?.toString() ?? '');
+    category = TextEditingController(text: d['category']?.toString() ?? '');
     price = TextEditingController(text: d['price']?.toString() ?? '');
     cost = TextEditingController(text: d['cost']?.toString() ?? '');
-    barcode = TextEditingController(text: d['barcode'] ?? '');
+    barcode = TextEditingController(text: d['barcode']?.toString() ?? '');
     stockQty = TextEditingController(
       text: (d['stockQty'] ?? d['stock'] ?? d['quantity'] ?? 0).toString(),
     );
@@ -97,7 +97,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
     }
 
     _existingImageUrl = d['imageUrl'] as String?;
-
     _loadStoreAndCategories();
   }
 
@@ -186,15 +185,13 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception("Not logged in. Please login again.");
+    if (user == null) throw Exception('Not logged in. Please login again.');
 
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final snap =
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
-      throw Exception("Missing storeId in users/${user.uid}.");
+      throw Exception('Missing storeId in users/${user.uid}.');
     }
     return storeId;
   }
@@ -242,7 +239,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to refresh item: $e")),
+        SnackBar(content: Text('Failed to refresh item: $e')),
       );
     }
   }
@@ -301,7 +298,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
   Future<Map<String, String>?> _uploadImageIfNeeded() async {
     if (representation != RepresentationType.image) {
-      return {"imageUrl": "", "imagePublicId": ""};
+      return {'imageUrl': '', 'imagePublicId': ''};
     }
 
     if (_pickedImage == null || _imageBytes == null) return null;
@@ -311,13 +308,16 @@ class _EditItemScreenState extends State<EditItemScreen> {
       filename: _pickedImage!.name,
     );
 
-    final imageUrl = res["secure_url"] as String?;
-    final publicId = res["public_id"] as String?;
+    final imageUrl = res['secure_url'] as String?;
+    final publicId = res['public_id'] as String?;
     if (imageUrl == null || publicId == null) {
-      throw Exception("Cloudinary response missing secure_url/public_id.");
+      throw Exception('Cloudinary response missing secure_url/public_id.');
     }
 
-    return {"imageUrl": imageUrl, "imagePublicId": publicId};
+    return {
+      'imageUrl': imageUrl,
+      'imagePublicId': publicId,
+    };
   }
 
   String? _validateRequired(String? value, String field) {
@@ -341,57 +341,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
     return null;
   }
 
-  String _normalizeBarcode(String value) {
-    return value.trim();
-  }
-
-  Future<void> _scanBarcodeIntoField() async {
-    if (saving) return;
-
-    final code = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => const BarcodeScannerScreen(),
-      ),
-    );
-
-    if (!mounted || code == null) return;
-
-    final normalized = _normalizeBarcode(code);
-    if (normalized.isEmpty) return;
-
-    setState(() {
-      barcode.text = normalized;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Barcode captured: $normalized')),
-    );
-  }
-
-  Future<bool> _barcodeExistsInStore({
-    required String storeId,
-    required String barcodeValue,
-    required String ignoreItemId,
-  }) async {
-    if (barcodeValue.isEmpty) return false;
-
-    final snap = await FirebaseFirestore.instance
-        .collection('stores')
-        .doc(storeId)
-        .collection('items')
-        .where('barcode', isEqualTo: barcodeValue)
-        .limit(10)
-        .get();
-
-    for (final doc in snap.docs) {
-      if (doc.id != ignoreItemId) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   Future<void> updateItem() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -406,26 +355,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
     try {
       final storeId = _storeId ?? await _requireStoreId();
-      final barcodeValue = _normalizeBarcode(barcode.text);
-
-      if (barcodeValue.isNotEmpty) {
-        final exists = await _barcodeExistsInStore(
-          storeId: storeId,
-          barcodeValue: barcodeValue,
-          ignoreItemId: widget.itemId,
-        );
-
-        if (exists) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Barcode already exists for another item.'),
-            ),
-          );
-          return;
-        }
-      }
-
       final uploaded = await _uploadImageIfNeeded();
 
       final updateData = <String, dynamic>{
@@ -434,7 +363,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'category': category.text.trim(),
         'price': double.tryParse(price.text.trim()) ?? 0,
         'cost': double.tryParse(cost.text.trim()) ?? 0,
-        'barcode': barcodeValue,
+        'barcode': barcode.text.trim(),
         'soldBy': soldBy == SoldBy.each ? 'each' : 'weight',
         'trackStock': true,
         'stockQty': int.tryParse(stockQty.text.trim()) ?? 0,
@@ -447,12 +376,12 @@ class _EditItemScreenState extends State<EditItemScreen> {
       };
 
       if (uploaded != null) {
-        if (uploaded["imageUrl"]!.isEmpty) {
+        if (uploaded['imageUrl']!.isEmpty) {
           updateData['imageUrl'] = null;
           updateData['imagePublicId'] = null;
         } else {
-          updateData['imageUrl'] = uploaded["imageUrl"];
-          updateData['imagePublicId'] = uploaded["imagePublicId"];
+          updateData['imageUrl'] = uploaded['imageUrl'];
+          updateData['imagePublicId'] = uploaded['imagePublicId'];
         }
       }
 
@@ -470,7 +399,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error updating item: $e")),
+        SnackBar(content: Text('Error updating item: $e')),
       );
     } finally {
       if (mounted) setState(() => saving = false);
@@ -481,16 +410,16 @@ class _EditItemScreenState extends State<EditItemScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Delete Item"),
-        content: const Text("This action cannot be undone."),
+        title: const Text('Delete Item'),
+        content: const Text('This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -513,7 +442,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error deleting item: $e")),
+        SnackBar(content: Text('Error deleting item: $e')),
       );
     }
   }
@@ -524,21 +453,27 @@ class _EditItemScreenState extends State<EditItemScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return SafeArea(
-          child: Padding(
+          child: Container(
+            margin: const EdgeInsets.all(16),
             padding: EdgeInsets.fromLTRB(
               16,
               16,
               16,
               16 + MediaQuery.of(sheetContext).viewInsets.bottom,
             ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Select Category',
+                    'Choose or type category',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 14),
@@ -593,13 +528,22 @@ class _EditItemScreenState extends State<EditItemScreen> {
                     width: double.infinity,
                     height: 46,
                     child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2AA39A),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
                       onPressed: () {
                         final value = newCategoryController.text.trim();
                         if (value.isEmpty) return;
                         _setCategory(value);
                         Navigator.pop(sheetContext);
                       },
-                      child: const Text('USE CATEGORY'),
+                      child: const Text(
+                        'USE CATEGORY',
+                        style: TextStyle(color: Colors.white),
+                      ),
                     ),
                   ),
                 ],
@@ -615,14 +559,20 @@ class _EditItemScreenState extends State<EditItemScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return SafeArea(
-          child: Padding(
+          child: Container(
+            margin: const EdgeInsets.all(16),
             padding: EdgeInsets.fromLTRB(
               16,
               16,
               16,
               16 + MediaQuery.of(sheetContext).viewInsets.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
             ),
             child: SingleChildScrollView(
               child: Column(
@@ -726,19 +676,22 @@ class _EditItemScreenState extends State<EditItemScreen> {
       hintText: hintText,
       suffixIcon: suffixIcon,
       filled: true,
-      fillColor: _fieldFill,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      hintStyle: const TextStyle(color: Colors.grey),
+      fillColor: const Color(0xFFF7F4F4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      hintStyle: const TextStyle(
+        color: Colors.grey,
+        fontSize: 15,
+      ),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _fieldBorder),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _fieldBorder),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _teal, width: 1.2),
       ),
     );
@@ -774,8 +727,8 @@ class _EditItemScreenState extends State<EditItemScreen> {
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: 92,
-            height: 92,
+            width: 128,
+            height: 128,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: representation == RepresentationType.color
@@ -787,31 +740,54 @@ class _EditItemScreenState extends State<EditItemScreen> {
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: imageProvider == null &&
                     representation == RepresentationType.image
-                ? const Icon(Icons.image_outlined, color: Colors.grey, size: 30)
+                ? const Icon(Icons.image_outlined, color: Colors.grey, size: 34)
                 : null,
           ),
           Positioned(
-            right: -2,
-            bottom: -2,
+            right: -4,
+            bottom: 6,
             child: Container(
-              width: 28,
-              height: 28,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: Colors.white,
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.black12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.edit, size: 15),
+              child: const Icon(Icons.edit, size: 18),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGradientBubble({
+    required double size,
+  }) {
+    return IgnorePointer(
+      child: Opacity(
+        opacity: 0.68,
+        child: Image.asset(
+          _gradientAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+        ),
       ),
     );
   }
@@ -828,17 +804,17 @@ class _EditItemScreenState extends State<EditItemScreen> {
       child: Row(
         children: [
           Container(
-            width: 24,
-            height: 24,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: _teal, width: 1.4),
+              border: Border.all(color: _teal, width: 1.5),
             ),
             child: selected
                 ? Center(
                     child: Container(
-                      width: 11,
-                      height: 11,
+                      width: 12,
+                      height: 12,
                       decoration: const BoxDecoration(
                         color: _teal,
                         shape: BoxShape.circle,
@@ -847,8 +823,11 @@ class _EditItemScreenState extends State<EditItemScreen> {
                   )
                 : null,
           ),
-          const SizedBox(width: 8),
-          Text(label),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 15),
+          ),
         ],
       ),
     );
@@ -876,7 +855,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    value.isEmpty ? 'Choose or type category' : value,
+                    value.isEmpty ? 'Select or add category' : value,
                     style: TextStyle(
                       color: value.isEmpty ? Colors.grey : Colors.black87,
                     ),
@@ -886,48 +865,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
               ],
             ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBarcodeField() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildLabel('Barcode'),
-        TextFormField(
-          controller: barcode,
-          decoration: _fieldDecoration(
-            hintText: 'Scan or enter barcode',
-            suffixIcon: SizedBox(
-              width: 96,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Scan barcode',
-                    onPressed: _scanBarcodeIntoField,
-                    icon: const Icon(Icons.qr_code_scanner_rounded),
-                  ),
-                  IconButton(
-                    tooltip: 'Clear barcode',
-                    onPressed: () {
-                      setState(() {
-                        barcode.clear();
-                      });
-                    },
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Optional, but barcode should be unique per item.',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
       ],
     );
@@ -973,84 +910,151 @@ class _EditItemScreenState extends State<EditItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Edit Item"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete, color: Colors.red),
-            onPressed: deleteItem,
-          ),
-        ],
-      ),
+      backgroundColor: const Color(0xFFF0F4F6),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                const SizedBox(height: 8),
-                Center(child: _buildPreviewCircle()),
-                const SizedBox(height: 28),
-                _buildLabel('Product Name'),
-                TextFormField(
-                  controller: name,
-                  decoration: _fieldDecoration(
-                    hintText: 'Product Name',
-                    suffixIcon: const Icon(Icons.edit_outlined, size: 18),
-                  ),
-                  validator: (v) => _validateRequired(v, 'Product Name'),
-                ),
-                const SizedBox(height: 14),
-                _buildCategoryField(),
-                const SizedBox(height: 14),
-                _buildLabel('Sold by'),
-                Row(
+        child: Stack(
+          children: [
+            Positioned(
+              left: -120,
+              top: -10,
+              child: _buildGradientBubble(size: 320),
+            ),
+            Positioned(
+              right: -125,
+              top: 420,
+              child: _buildGradientBubble(size: 280),
+            ),
+            Positioned(
+              left: -115,
+              bottom: -10,
+              child: _buildGradientBubble(size: 250),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+              child: Form(
+                key: _formKey,
+                child: ListView(
                   children: [
-                    _buildSoldByOption(label: 'Each', value: SoldBy.each),
-                    const SizedBox(width: 34),
-                    _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon:
+                              const Icon(Icons.arrow_back, color: Colors.black),
+                        ),
+                        const Expanded(
+                          child: Center(
+                            child: Text(
+                              'Edit Item',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: deleteItem,
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Center(child: _buildPreviewCircle()),
+                    const SizedBox(height: 34),
+                    _buildLabel('Product Name'),
+                    TextFormField(
+                      controller: name,
+                      decoration: _fieldDecoration(
+                        hintText: 'Product Name',
+                        suffixIcon: const Icon(Icons.edit_outlined, size: 18),
+                      ),
+                      validator: (v) => _validateRequired(v, 'Product Name'),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildCategoryField(),
+                    const SizedBox(height: 14),
+                    _buildLabel('Sold by'),
+                    Row(
+                      children: [
+                        _buildSoldByOption(
+                          label: 'Each',
+                          value: SoldBy.each,
+                        ),
+                        const SizedBox(width: 34),
+                        _buildSoldByOption(
+                          label: 'Weight',
+                          value: SoldBy.weight,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Barcode'),
+                    TextFormField(
+                      controller: barcode,
+                      decoration: _fieldDecoration(
+                        hintText: 'Barcode',
+                        suffixIcon: const Icon(Icons.qr_code_2_rounded),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildStockActionSection(),
+                    const SizedBox(height: 14),
+                    _buildLabel('Selling Price'),
+                    TextFormField(
+                      controller: price,
+                      decoration: _fieldDecoration(hintText: 'Price'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) => _validateMoney(v, 'Selling Price'),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildLabel('Cost'),
+                    TextFormField(
+                      controller: cost,
+                      decoration: _fieldDecoration(hintText: 'Cost'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: (v) => _validateMoney(v, 'Cost'),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: saving ? null : updateItem,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2AA39A),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: saving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'SAVE CHANGES',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                _buildLabel('Selling Price'),
-                TextFormField(
-                  controller: price,
-                  decoration: _fieldDecoration(hintText: 'Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Selling Price'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Cost'),
-                TextFormField(
-                  controller: cost,
-                  decoration: _fieldDecoration(hintText: 'Cost'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Cost'),
-                ),
-                const SizedBox(height: 14),
-                _buildBarcodeField(),
-                const SizedBox(height: 14),
-                _buildStockActionSection(),
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: saving ? null : updateItem,
-                    child: saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text("SAVE CHANGES"),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
