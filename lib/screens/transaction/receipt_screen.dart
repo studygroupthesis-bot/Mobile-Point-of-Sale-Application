@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../auth/widget/receipt_qr_card.dart';
 
 class ReceiptLine {
   final String name;
@@ -51,8 +54,13 @@ class ReceiptData {
 
 class ReceiptScreen extends StatelessWidget {
   final ReceiptData data;
+  final String? receiptUrl;
 
-  const ReceiptScreen({super.key, required this.data});
+  const ReceiptScreen({
+    super.key,
+    required this.data,
+    this.receiptUrl,
+  });
 
   String _formatDateTime(DateTime dt) {
     const months = [
@@ -115,12 +123,47 @@ class ReceiptScreen extends StatelessWidget {
       b.writeln('Change: ${_money(data.change)}');
     }
 
+    if ((receiptUrl ?? '').trim().isNotEmpty) {
+      b.writeln('---');
+      b.writeln('View receipt: $receiptUrl');
+    }
+
     b.writeln('Thank you! Visit again!');
     return b.toString();
   }
 
+  Future<void> _handleShare(BuildContext context) async {
+    final hasReceiptUrl = (receiptUrl ?? '').trim().isNotEmpty;
+
+    if (hasReceiptUrl) {
+      await SharePlus.instance.share(
+        ShareParams(
+          subject: 'Receipt ${data.invoiceNo}',
+          text: 'Thank you for your purchase.\n\n'
+              'Receipt #${data.invoiceNo}\n'
+              'View your receipt here:\n$receiptUrl',
+        ),
+      );
+      return;
+    }
+
+    await Clipboard.setData(
+      ClipboardData(text: _shareText()),
+    );
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Receipt copied to clipboard.'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasReceiptUrl = (receiptUrl ?? '').trim().isNotEmpty;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7CBD0),
       body: SafeArea(
@@ -165,7 +208,7 @@ class ReceiptScreen extends StatelessWidget {
                   width: 54,
                   height: 54,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.6),
+                    color: Colors.white.withValues(alpha: 0.6),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
@@ -178,115 +221,125 @@ class ReceiptScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.92),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 14,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          'Invoice #${data.invoiceNo}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
+                  child: SingleChildScrollView(
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 14,
+                            offset: const Offset(0, 8),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatDateTime(data.dateTime),
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        const SizedBox(height: 10),
-                        const Divider(height: 1),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            _headerCell('P Mode'),
-                            _headerCell('Items'),
-                            _headerCell('U#'),
-                            _headerCell('Amount'),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            _valueCell(data.paymentMode),
-                            _valueCell('${data.items.length}'),
-                            _valueCell(_shortCashierUid(data.cashierUid)),
-                            _valueCell(_money(data.grandTotal)),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        const Divider(height: 1),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: const [
-                            Expanded(
-                              flex: 4,
-                              child: Text(
-                                'Name',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
-                                ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Center(
+                            child: Text(
+                              'Invoice #${data.invoiceNo}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
                               ),
                             ),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                'Price',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
+                          ),
+                          const SizedBox(height: 2),
+                          Center(
+                            child: Text(
+                              _formatDateTime(data.dateTime),
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              _headerCell('P Mode'),
+                              _headerCell('Items'),
+                              _headerCell('U#'),
+                              _headerCell('Amount'),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              _valueCell(data.paymentMode),
+                              _valueCell('${data.items.length}'),
+                              _valueCell(_shortCashierUid(data.cashierUid)),
+                              _valueCell(_money(data.grandTotal)),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: const [
+                              Expanded(
+                                flex: 4,
+                                child: Text(
+                                  'Name',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: Text(
-                                'Qty',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  'Price',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                'Total',
-                                textAlign: TextAlign.end,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
+                              Expanded(
+                                flex: 1,
+                                child: Text(
+                                  'Qty',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: data.items.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No items',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.black54,
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  'Total',
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          data.items.isEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 24),
+                                  child: Center(
+                                    child: Text(
+                                      'No items',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black54,
+                                      ),
                                     ),
                                   ),
                                 )
                               : ListView.separated(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
                                   itemCount: data.items.length,
                                   separatorBuilder: (_, __) =>
                                       const SizedBox(height: 6),
@@ -333,37 +386,46 @@ class ReceiptScreen extends StatelessWidget {
                                     );
                                   },
                                 ),
-                        ),
-                        const Divider(height: 18),
-                        _kv('Sub total', _money(data.subtotal)),
-                        _kv('Tax @ 12%', _money(data.tax)),
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
+                          const Divider(height: 18),
+                          _kv('Sub total', _money(data.subtotal)),
+                          _kv('Tax', _money(data.tax)),
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD5F0EC),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: _kv(
+                              'Grand Total',
+                              _money(data.grandTotal),
+                              bold: true,
+                            ),
                           ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD5F0EC),
-                            borderRadius: BorderRadius.circular(12),
+                          if (data.paymentMode.toLowerCase() == 'cash') ...[
+                            const SizedBox(height: 8),
+                            _kv('Received', _money(data.amountReceived)),
+                            _kv('Change', _money(data.change)),
+                          ],
+                          const SizedBox(height: 10),
+                          const Center(
+                            child: Text(
+                              'Thank you! Visit again!',
+                              style: TextStyle(fontSize: 11),
+                            ),
                           ),
-                          child: _kv(
-                            'Grand Total',
-                            _money(data.grandTotal),
-                            bold: true,
-                          ),
-                        ),
-                        if (data.paymentMode.toLowerCase() == 'cash') ...[
-                          const SizedBox(height: 8),
-                          _kv('Received', _money(data.amountReceived)),
-                          _kv('Change', _money(data.change)),
+                          if (hasReceiptUrl) ...[
+                            const SizedBox(height: 14),
+                            ReceiptQrCard(
+                              receiptUrl: receiptUrl!,
+                              receiptNumber: data.invoiceNo,
+                            ),
+                          ],
                         ],
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Thank you! Visit again!',
-                          style: TextStyle(fontSize: 11),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -397,20 +459,8 @@ class ReceiptScreen extends StatelessWidget {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    onPressed: () async {
-                      await Clipboard.setData(
-                        ClipboardData(text: _shareText()),
-                      );
-
-                      if (!context.mounted) return;
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Receipt copied to clipboard.'),
-                        ),
-                      );
-                    },
-                    child: const Text('SHARE'),
+                    onPressed: () => _handleShare(context),
+                    child: Text(hasReceiptUrl ? 'SHARE RECEIPT LINK' : 'SHARE'),
                   ),
                 ),
               ],

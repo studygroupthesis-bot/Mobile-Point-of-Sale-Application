@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../services/receipt_share_service.dart';
 import 'receipt_screen.dart';
 
 class StorePaymentConfig {
@@ -726,6 +727,47 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final now = DateTime.now();
       final invoiceNo = _makeInvoiceNo(txRef.id);
 
+      final cashierName =
+          (user.displayName != null && user.displayName!.trim().isNotEmpty)
+              ? user.displayName!.trim()
+              : ((user.email != null && user.email!.trim().isNotEmpty)
+                  ? user.email!.trim()
+                  : user.uid);
+
+      final itemsPayload = _cart.map((i) {
+        return {
+          'itemId': i.itemId,
+          'name': i.name,
+          'barcode': i.barcode,
+          'price': i.price,
+          'qty': i.qty,
+          'total': i.total,
+        };
+      }).toList();
+
+      final transactionData = <String, dynamic>{
+        'createdAt': FieldValue.serverTimestamp(),
+        'createdAtLocal': now.toIso8601String(),
+        'invoiceId': txRef.id,
+        'invoiceNo': invoiceNo,
+        'receiptNumber': invoiceNo,
+        'invoiceNoLower': invoiceNo.toLowerCase(),
+        'storeId': storeId,
+        'storeName': config.storeName,
+        'paymentMethod': paymentMode,
+        'paymentMode': paymentMode,
+        'total': grandTotal,
+        'status': 'Success',
+        'cashierUid': user.uid,
+        'cashierName': cashierName,
+        'subtotal': subtotal,
+        'tax': vat12,
+        'grandTotal': grandTotal,
+        'amountReceived': amountReceived,
+        'change': change,
+        'items': itemsPayload,
+      };
+
       await firestore.runTransaction((transaction) async {
         final itemRefs = <String, DocumentReference<Map<String, dynamic>>>{};
         final currentStocks = <String, int>{};
@@ -757,35 +799,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           currentStocks[cartItem.itemId] = currentStock;
         }
 
-        transaction.set(txRef, {
-          'createdAt': FieldValue.serverTimestamp(),
-          'createdAtLocal': now.toIso8601String(),
-          'invoiceId': txRef.id,
-          'invoiceNo': invoiceNo,
-          'invoiceNoLower': invoiceNo.toLowerCase(),
-          'storeId': storeId,
-          'storeName': config.storeName,
-          'paymentMethod': paymentMode,
-          'paymentMode': paymentMode,
-          'total': grandTotal,
-          'status': 'Success',
-          'cashierUid': user.uid,
-          'subtotal': subtotal,
-          'tax': vat12,
-          'grandTotal': grandTotal,
-          'amountReceived': amountReceived,
-          'change': change,
-          'items': _cart.map((i) {
-            return {
-              'itemId': i.itemId,
-              'name': i.name,
-              'barcode': i.barcode,
-              'price': i.price,
-              'qty': i.qty,
-              'total': i.total,
-            };
-          }).toList(),
-        });
+        transaction.set(txRef, transactionData);
 
         for (final cartItem in _cart) {
           final itemRef = itemRefs[cartItem.itemId]!;
@@ -821,6 +835,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
         }
       });
 
+      final receiptShare =
+          await ReceiptShareService.instance.ensurePublicReceipt(
+        storeId: storeId,
+        transactionId: txRef.id,
+        transactionData: transactionData,
+      );
+
       final receipt = ReceiptData(
         invoiceId: txRef.id,
         invoiceNo: invoiceNo,
@@ -853,7 +874,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ReceiptScreen(data: receipt),
+          builder: (_) => ReceiptScreen(
+            data: receipt,
+            receiptUrl: receiptShare.url,
+          ),
         ),
       );
     } on FirebaseException catch (e) {

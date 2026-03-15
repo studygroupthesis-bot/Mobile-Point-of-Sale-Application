@@ -183,12 +183,18 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
       items: items,
     );
 
+    final receiptUrl = (data['publicReceiptUrl'] as String?)?.trim();
+
     if (!mounted) return;
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ReceiptScreen(data: receipt),
+        builder: (_) => ReceiptScreen(
+          data: receipt,
+          receiptUrl:
+              (receiptUrl != null && receiptUrl.isNotEmpty) ? receiptUrl : null,
+        ),
       ),
     );
   }
@@ -206,6 +212,8 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
         (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString();
     final amount = _safeToDouble(data['grandTotal']);
     final status = (data['status'] ?? 'Success').toString();
+    final receiptUrl = (data['publicReceiptUrl'] as String?)?.trim() ?? '';
+    final hasReceiptUrl = receiptUrl.isNotEmpty;
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
@@ -252,6 +260,15 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                 ],
               ),
             ),
+            if (hasReceiptUrl)
+              IconButton(
+                tooltip: 'Show QR receipt',
+                onPressed: () => _openReceipt(store: store, doc: doc),
+                icon: const Icon(
+                  Icons.qr_code_2,
+                  color: Color(0xFF0E6C73),
+                ),
+              ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
