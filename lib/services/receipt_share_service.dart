@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart';
 
 class ReceiptShareResult {
-  final String token;
   final String url;
+  final String docPath;
 
   const ReceiptShareResult({
-    required this.token,
     required this.url,
+    required this.docPath,
   });
 }
 
@@ -15,118 +15,148 @@ class ReceiptShareService {
   ReceiptShareService._();
 
   static final ReceiptShareService instance = ReceiptShareService._();
-  static const Uuid _uuid = Uuid();
 
-  static const String receiptBaseUrl =
-      'https://fi-pos-system.web.app/#/receipt';
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   Future<ReceiptShareResult> ensurePublicReceipt({
     required String storeId,
     required String transactionId,
     required Map<String, dynamic> transactionData,
   }) async {
-    final txRef = FirebaseFirestore.instance
+    final publicRef = _db
+        .collection('stores')
+        .doc(storeId)
+        .collection('public_receipts')
+        .doc(transactionId);
+
+    final transactionRef = _db
         .collection('stores')
         .doc(storeId)
         .collection('transactions')
         .doc(transactionId);
 
-    final existingToken = (transactionData['receiptToken'] as String?)?.trim();
-    final existingUrl =
-        (transactionData['publicReceiptUrl'] as String?)?.trim();
+    final publicData = _buildPublicReceiptData(
+      storeId: storeId,
+      transactionId: transactionId,
+      data: transactionData,
+    );
 
-    if (existingToken != null && existingToken.isNotEmpty) {
-      return ReceiptShareResult(
-        token: existingToken,
-        url: (existingUrl != null && existingUrl.isNotEmpty)
-            ? existingUrl
-            : _buildReceiptUrl(existingToken),
-      );
-    }
+    await publicRef.set(publicData, SetOptions(merge: true));
 
-    final token = _uuid.v4().replaceAll('-', '');
-    final url = _buildReceiptUrl(token);
+    final url = _buildPublicReceiptUrl(
+      storeId: storeId,
+      transactionId: transactionId,
+    );
 
-    final publicReceipt = <String, dynamic>{
-      'token': token,
-      'storeId': storeId,
-      'transactionId': transactionId,
-      'receiptNumber': transactionData['receiptNumber'] ??
-          transactionData['invoiceNo'] ??
-          transactionId,
-      'storeName': transactionData['storeName'] ?? '',
-      'cashierName':
-          transactionData['cashierName'] ?? transactionData['cashierUid'] ?? '',
-      'paymentMethod': transactionData['paymentMethod'] ??
-          transactionData['paymentMode'] ??
-          'Cash',
-      'subtotal': _toDouble(transactionData['subtotal']),
-      'discount': _toDouble(transactionData['discount']),
-      'tax': _toDouble(transactionData['tax']),
-      'total': _toDouble(
-        transactionData['total'] ?? transactionData['grandTotal'],
-      ),
-      'amountPaid': _toDouble(
-        transactionData['amountPaid'] ?? transactionData['amountReceived'],
-      ),
-      'change': _toDouble(transactionData['change']),
-      'items': _sanitizeItems(transactionData['items']),
-      'createdAt': transactionData['createdAt'] ?? FieldValue.serverTimestamp(),
-      'createdAtLocal': transactionData['createdAtLocal'],
-      'sharedAt': FieldValue.serverTimestamp(),
-      'isActive': true,
-    };
-
-    await FirebaseFirestore.instance
-        .collection('public_receipts')
-        .doc(token)
-        .set(publicReceipt);
-
-    await txRef.update({
-      'receiptToken': token,
+    await transactionRef.set({
       'publicReceiptUrl': url,
-      'receiptSharedAt': FieldValue.serverTimestamp(),
-    });
+      'publicReceiptPath': publicRef.path,
+      'publicReceiptEnabled': true,
+      'publicReceiptUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
 
-    return ReceiptShareResult(token: token, url: url);
+    return ReceiptShareResult(
+      url: url,
+      docPath: publicRef.path,
+    );
   }
 
-  String _buildReceiptUrl(String token) {
-    return '$receiptBaseUrl?token=${Uri.encodeQueryComponent(token)}';
+  Map<String, dynamic> _buildPublicReceiptData({
+    required String storeId,
+    required String transactionId,
+    required Map<String, dynamic> data,
+  }) {
+    return {
+      'storeId': storeId,
+      'transactionId': transactionId,
+      'invoiceId': (data['invoiceId'] ?? transactionId).toString(),
+      'invoiceNo': (data['invoiceNo'] ?? data['receiptNumber'] ?? transactionId)
+          .toString(),
+      'receiptNumber':
+          (data['receiptNumber'] ?? data['invoiceNo'] ?? transactionId)
+              .toString(),
+      'storeName': (data['storeName'] ?? 'Business Sale').toString(),
+      'createdAt': data['createdAt'],
+      'createdAtLocal': data['createdAtLocal'],
+      'paymentMethod':
+          (data['paymentMethod'] ?? data['paymentMode'] ?? 'Cash').toString(),
+      'paymentMode':
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString(),
+      'subtotal': _safeToDouble(data['subtotal']),
+      'taxableSales': _safeToDouble(
+        data['taxableSales'],
+        fallback: _safeToDouble(data['subtotal']),
+      ),
+      'taxEnabled': data['taxEnabled'] == true,
+      'taxName': (data['taxName'] ?? 'VAT').toString(),
+      'taxRate': _safeToDouble(data['taxRate'], fallback: 12.0),
+      'taxInclusive': data['taxInclusive'] != false,
+      'tax': _safeToDouble(
+        data['tax'],
+        fallback: _safeToDouble(data['taxAmount']),
+      ),
+      'grandTotal': _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      ),
+      'total': _safeToDouble(
+        data['total'],
+        fallback: _safeToDouble(data['grandTotal']),
+      ),
+      'amountReceived': _safeToDouble(
+        data['amountReceived'],
+        fallback: _safeToDouble(data['amountPaid']),
+      ),
+      'amountPaid': _safeToDouble(
+        data['amountPaid'],
+        fallback: _safeToDouble(data['amountReceived']),
+      ),
+      'change': _safeToDouble(data['change']),
+      'items': _sanitizeItems(data['items']),
+      'status': (data['status'] ?? 'Success').toString(),
+      'isActive': true,
+      'sharedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
   }
 
   List<Map<String, dynamic>> _sanitizeItems(dynamic rawItems) {
-    if (rawItems is! List) return [];
+    if (rawItems is! List) return const [];
 
     return rawItems.map<Map<String, dynamic>>((item) {
-      final map =
-          item is Map ? Map<String, dynamic>.from(item) : <String, dynamic>{};
-
-      final qty = _toInt(map['qty']);
-      final price = _toDouble(map['price']);
-      final lineTotal = _toDouble(
-        map['total'] ?? map['lineTotal'] ?? (qty * price),
-      );
-
+      final map = Map<String, dynamic>.from(item as Map);
       return {
-        'name': map['name'] ?? '',
-        'barcode': map['barcode'] ?? '',
-        'qty': qty,
-        'price': price,
-        'total': lineTotal,
+        'itemId': map['itemId']?.toString(),
+        'name': (map['name'] ?? '').toString(),
+        'barcode': map['barcode']?.toString(),
+        'price': _safeToDouble(map['price']),
+        'qty': _safeToInt(map['qty']),
+        'total': _safeToDouble(
+          map['total'],
+          fallback: _safeToDouble(map['price']) * _safeToInt(map['qty']),
+        ),
       };
     }).toList();
   }
 
-  double _toDouble(dynamic value) {
-    if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value) ?? 0;
-    return 0;
+  String _buildPublicReceiptUrl({
+    required String storeId,
+    required String transactionId,
+  }) {
+    final origin = Uri.base.origin;
+    return '$origin/#/public-receipt?storeId='
+        '${Uri.encodeComponent(storeId)}&transactionId='
+        '${Uri.encodeComponent(transactionId)}';
   }
 
-  int _toInt(dynamic value) {
+  double _safeToDouble(dynamic value, {double fallback = 0.0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
     if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
   }
 }

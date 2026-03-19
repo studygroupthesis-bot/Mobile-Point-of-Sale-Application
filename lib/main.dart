@@ -25,33 +25,66 @@ Future<void> main() async {
 class PopPayRoot extends StatelessWidget {
   const PopPayRoot({super.key});
 
-  String? _extractReceiptTokenFromUrl() {
-    if (!kIsWeb) return null;
+  Map<String, String?> _extractPublicReceiptParamsFromUrl() {
+    if (!kIsWeb) {
+      return {
+        'storeId': null,
+        'transactionId': null,
+      };
+    }
 
-    final directToken = Uri.base.queryParameters['token']?.trim();
-    if (directToken != null && directToken.isNotEmpty) {
-      return directToken;
+    final directStoreId = Uri.base.queryParameters['storeId']?.trim();
+    final directTransactionId =
+        Uri.base.queryParameters['transactionId']?.trim();
+
+    if ((directStoreId?.isNotEmpty ?? false) &&
+        (directTransactionId?.isNotEmpty ?? false)) {
+      return {
+        'storeId': directStoreId,
+        'transactionId': directTransactionId,
+      };
     }
 
     final fragment = Uri.base.fragment.trim();
-    if (fragment.isEmpty) return null;
+    if (fragment.isEmpty) {
+      return {
+        'storeId': null,
+        'transactionId': null,
+      };
+    }
 
     final normalized = fragment.startsWith('/') ? fragment : '/$fragment';
     final uri = Uri.tryParse(normalized);
 
     final path = uri?.path ?? '';
-    if (!path.startsWith('/receipt')) return null;
+    if (!path.startsWith('/public-receipt')) {
+      return {
+        'storeId': null,
+        'transactionId': null,
+      };
+    }
 
-    final token = uri?.queryParameters['token']?.trim();
-    if (token == null || token.isEmpty) return null;
+    final storeId = uri?.queryParameters['storeId']?.trim();
+    final transactionId = uri?.queryParameters['transactionId']?.trim();
 
-    return token;
+    return {
+      'storeId': (storeId != null && storeId.isNotEmpty) ? storeId : null,
+      'transactionId': (transactionId != null && transactionId.isNotEmpty)
+          ? transactionId
+          : null,
+    };
   }
 
   Widget _resolveHome() {
-    final receiptToken = _extractReceiptTokenFromUrl();
-    if (receiptToken != null) {
-      return PublicReceiptScreen(token: receiptToken);
+    final params = _extractPublicReceiptParamsFromUrl();
+    final storeId = params['storeId'];
+    final transactionId = params['transactionId'];
+
+    if (storeId != null && transactionId != null) {
+      return PublicReceiptScreen(
+        storeId: storeId,
+        transactionId: transactionId,
+      );
     }
 
     return const IntroScreen();
