@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-// ✅ CHANGE THIS IMPORT PATH IF NEEDED
 import '../transaction/transaction_screen.dart';
+import '../transaction/receipt_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -19,7 +19,7 @@ class _SalesScreenState extends State<SalesScreen> {
   bool _searching = false;
   final TextEditingController _searchCtrl = TextEditingController();
 
-  int _navIndex = 1; // 0 home, 1 sales, 2 inventory, 3 profile
+  int _navIndex = 1;
 
   final money = NumberFormat.currency(locale: 'en_PH', symbol: '₱');
   final timeFmt = DateFormat('h:mm a');
@@ -30,7 +30,6 @@ class _SalesScreenState extends State<SalesScreen> {
     super.dispose();
   }
 
-  // Same pattern as your TransactionScreen: users/{uid}.storeId
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception("Not logged in.");
@@ -43,6 +42,30 @@ class _SalesScreenState extends State<SalesScreen> {
     return storeId;
   }
 
+  double _safeToDouble(dynamic value, {double fallback = 0.0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
+  }
+
+  DateTime _parseTxDate(Map<String, dynamic> data) {
+    final ts = data['createdAt'];
+    if (ts is Timestamp) return ts.toDate();
+
+    final local = data['createdAtLocal'];
+    if (local is String) {
+      final parsed = DateTime.tryParse(local);
+      if (parsed != null) return parsed;
+    }
+
+    return DateTime.now();
+  }
+
   DateTime get _startOfToday {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
@@ -50,7 +73,6 @@ class _SalesScreenState extends State<SalesScreen> {
 
   DateTime get _startOfTomorrow => _startOfToday.add(const Duration(days: 1));
 
-  // Stream for Today's Sales (sum totals from today's transactions)
   Stream<double> _todaysSalesStream(String storeId) {
     return _db
         .collection('stores')
@@ -68,15 +90,16 @@ class _SalesScreenState extends State<SalesScreen> {
         .map((snap) {
       double sum = 0;
       for (final d in snap.docs) {
-        final raw = d.data()['total'] ?? 0;
-        final v = raw is int ? raw.toDouble() : (raw as num).toDouble();
-        sum += v;
+        final data = d.data();
+        sum += _safeToDouble(
+          data['grandTotal'],
+          fallback: _safeToDouble(data['total']),
+        );
       }
       return sum;
     });
   }
 
-  // Stream for list (either latest or invoice prefix search)
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _txListStream(
     String storeId,
   ) {
@@ -93,7 +116,6 @@ class _SalesScreenState extends State<SalesScreen> {
           .map((s) => s.docs);
     }
 
-    // ✅ Prefix search using invoiceNoLower (requires the field exists)
     return col
         .orderBy('invoiceNoLower')
         .startAt([q])
@@ -103,7 +125,6 @@ class _SalesScreenState extends State<SalesScreen> {
         .map((s) {
           final docs = s.docs.toList();
 
-          // Optional: sort by latest so UI still looks like "history"
           docs.sort((a, b) {
             final ta = a.data()['createdAt'];
             final tb = b.data()['createdAt'];
@@ -128,6 +149,75 @@ class _SalesScreenState extends State<SalesScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => const TransactionScreen(isActive: true),
+      ),
+    );
+  }
+
+  Future<void> _openReceipt(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    final data = doc.data();
+
+    final rawItems = (data['items'] as List?) ?? [];
+    final items = rawItems.map((e) {
+      final map = Map<String, dynamic>.from(e as Map);
+      return ReceiptLine(
+        name: (map['name'] ?? '').toString(),
+        price: _safeToDouble(map['price']),
+        qty: _safeToInt(map['qty']),
+      );
+    }).toList();
+
+    final subtotal = _safeToDouble(data['subtotal']);
+    final tax = _safeToDouble(
+      data['tax'],
+      fallback: _safeToDouble(data['taxAmount']),
+    );
+
+    final taxEnabled =
+        (data['taxEnabled'] as bool?) ?? ((tax > 0) ? true : false);
+
+    final taxableSales = _safeToDouble(
+      data['taxableSales'],
+      fallback: taxEnabled ? (subtotal - tax) : subtotal,
+    );
+
+    final receipt = ReceiptData(
+      invoiceId: (data['invoiceId'] ?? doc.id).toString(),
+      invoiceNo: (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString(),
+      storeName: (data['storeName'] ?? 'Business Sale').toString(),
+      dateTime: _parseTxDate(data),
+      paymentMode:
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString(),
+      cashierUid: (data['cashierUid'] ?? '').toString(),
+      subtotal: subtotal,
+      taxableSales: taxableSales,
+      taxEnabled: taxEnabled,
+      taxName: (data['taxName'] ?? 'VAT').toString(),
+      taxRate: _safeToDouble(data['taxRate'], fallback: 12.0),
+      taxInclusive: (data['taxInclusive'] as bool?) ?? true,
+      tax: tax,
+      grandTotal: _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      ),
+      amountReceived: _safeToDouble(data['amountReceived']),
+      change: _safeToDouble(data['change']),
+      items: items,
+    );
+
+    final receiptUrl = (data['publicReceiptUrl'] as String?)?.trim();
+
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReceiptScreen(
+          data: receipt,
+          receiptUrl:
+              (receiptUrl != null && receiptUrl.isNotEmpty) ? receiptUrl : null,
+        ),
       ),
     );
   }
@@ -236,7 +326,8 @@ class _SalesScreenState extends State<SalesScreen> {
       stream: _db.collection('stores').doc(storeId).snapshots(),
       builder: (context, snap) {
         final data = snap.data?.data() ?? {};
-        final storeName = (data['name'] ?? 'Store').toString();
+        final storeName =
+            (data['business_name'] ?? data['name'] ?? 'Store').toString();
 
         return Row(
           children: [
@@ -274,9 +365,7 @@ class _SalesScreenState extends State<SalesScreen> {
               icon: Icon(_searching ? Icons.close : Icons.search),
             ),
             IconButton(
-              onPressed: () {
-                // TODO: menu/settings
-              },
+              onPressed: () {},
               icon: const Icon(Icons.menu),
             ),
           ],
@@ -365,12 +454,12 @@ class _SalesScreenState extends State<SalesScreen> {
         (d['paymentMethod'] ?? d['paymentMode'] ?? 'Cash').toString();
     final status = (d['status'] ?? 'Success').toString();
 
-    final rawTotal = d['total'] ?? d['grandTotal'] ?? 0;
-    final total =
-        rawTotal is int ? rawTotal.toDouble() : (rawTotal as num).toDouble();
+    final total = _safeToDouble(
+      d['grandTotal'],
+      fallback: _safeToDouble(d['total']),
+    );
 
-    final ts = d['createdAt'];
-    final dt = ts is Timestamp ? ts.toDate() : DateTime.now();
+    final dt = _parseTxDate(d);
 
     return Container(
       decoration: BoxDecoration(
@@ -392,7 +481,13 @@ class _SalesScreenState extends State<SalesScreen> {
         ),
         subtitle: Row(
           children: [
-            Text(method, style: const TextStyle(color: Colors.black54)),
+            Expanded(
+              child: Text(
+                method,
+                style: const TextStyle(color: Colors.black54),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             const SizedBox(width: 10),
             Text(
               timeFmt.format(dt),
@@ -419,9 +514,7 @@ class _SalesScreenState extends State<SalesScreen> {
             ),
           ],
         ),
-        onTap: () {
-          // TODO: open receipt detail (optional)
-        },
+        onTap: () => _openReceipt(doc),
       ),
     );
   }

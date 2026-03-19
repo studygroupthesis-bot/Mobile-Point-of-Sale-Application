@@ -82,35 +82,55 @@ class ProfileScreen extends StatelessWidget {
                         builder: (context, snap) {
                           final data = snap.data?.data();
                           final role = (data?['role'] as String?) ?? '';
+                          final isAdmin = role == 'admin';
 
-                          if (role != 'admin') return const SizedBox.shrink();
-
-                          return _menuItem(
-                            icon: Icons.group,
-                            title: "Manage Users",
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ManageUsersScreen(),
+                          return Column(
+                            children: [
+                              if (isAdmin)
+                                _menuItem(
+                                  icon: Icons.group,
+                                  title: "Manage Users",
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ManageUsersScreen(),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
+                              _menuItem(
+                                icon: Icons.store_mall_directory,
+                                title: "Store Settings",
+                                subtitle: isAdmin
+                                    ? "Business, payments, and tax settings"
+                                    : "Admin only",
+                                enabled: isAdmin,
+                                onTap: isAdmin
+                                    ? () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const StoreSettingsScreen(),
+                                          ),
+                                        );
+                                      }
+                                    : null,
+                              ),
+                            ],
                           );
                         },
+                      )
+                    else
+                      _menuItem(
+                        icon: Icons.store_mall_directory,
+                        title: "Store Settings",
+                        subtitle: "Admin only",
+                        enabled: false,
+                        onTap: null,
                       ),
-                    _menuItem(
-                      icon: Icons.store_mall_directory,
-                      title: "Store Settings",
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const StoreSettingsScreen(),
-                          ),
-                        );
-                      },
-                    ),
                     _menuItem(
                       icon: Icons.cloud_sync,
                       title: "Data Sync",
@@ -155,18 +175,43 @@ class ProfileScreen extends StatelessWidget {
   Widget _menuItem({
     required IconData icon,
     required String title,
-    required VoidCallback onTap,
+    String? subtitle,
+    required VoidCallback? onTap,
+    bool enabled = true,
   }) {
+    final color = enabled ? Colors.black : Colors.black38;
+
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 24),
+            Icon(icon, size: 24, color: color),
             const SizedBox(width: 12),
-            Expanded(child: Text(title, style: const TextStyle(fontSize: 16))),
-            const Icon(Icons.chevron_right, size: 24),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(fontSize: 16, color: color),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: enabled ? Colors.black54 : Colors.black38,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 24, color: color),
           ],
         ),
       ),

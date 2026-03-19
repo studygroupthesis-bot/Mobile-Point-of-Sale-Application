@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../transaction/receipt_screen.dart';
+import 'daily_audit_screen.dart';
 
 class StoreContext {
   final String storeId;
@@ -34,9 +35,9 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  double _safeToDouble(dynamic value) {
+  double _safeToDouble(dynamic value, {double fallback = 0.0}) {
     if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '0') ?? 0.0;
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
   }
 
   int _safeToInt(dynamic value) {
@@ -64,7 +65,10 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
         .doc(storeId)
         .get();
 
-    final storeName = (storeSnap.data()?['name'] ?? 'Business Sale').toString();
+    final storeData = storeSnap.data() ?? {};
+    final storeName =
+        (storeData['business_name'] ?? storeData['name'] ?? 'Business Sale')
+            .toString();
 
     return StoreContext(
       storeId: storeId,
@@ -151,6 +155,19 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
     });
   }
 
+  Future<void> _openDailyAudit(StoreContext store) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DailyAuditScreen(
+          storeId: store.storeId,
+          storeName: store.storeName,
+          selectedDate: _selectedDate,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openReceipt({
     required StoreContext store,
     required QueryDocumentSnapshot<Map<String, dynamic>> doc,
@@ -167,6 +184,19 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
       );
     }).toList();
 
+    final subtotal = _safeToDouble(data['subtotal']);
+    final tax = _safeToDouble(
+      data['tax'],
+      fallback: _safeToDouble(data['taxAmount']),
+    );
+
+    final taxEnabled = (data['taxEnabled'] as bool?) ?? (tax > 0);
+
+    final taxableSales = _safeToDouble(
+      data['taxableSales'],
+      fallback: taxEnabled ? (subtotal - tax) : subtotal,
+    );
+
     final receipt = ReceiptData(
       invoiceId: (data['invoiceId'] ?? doc.id).toString(),
       invoiceNo: (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString(),
@@ -175,9 +205,17 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
       paymentMode:
           (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString(),
       cashierUid: (data['cashierUid'] ?? '').toString(),
-      subtotal: _safeToDouble(data['subtotal']),
-      tax: _safeToDouble(data['tax']),
-      grandTotal: _safeToDouble(data['grandTotal']),
+      subtotal: subtotal,
+      taxableSales: taxableSales,
+      taxEnabled: taxEnabled,
+      taxName: (data['taxName'] ?? 'VAT').toString(),
+      taxRate: _safeToDouble(data['taxRate'], fallback: 12.0),
+      taxInclusive: (data['taxInclusive'] as bool?) ?? true,
+      tax: tax,
+      grandTotal: _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      ),
       amountReceived: _safeToDouble(data['amountReceived']),
       change: _safeToDouble(data['change']),
       items: items,
@@ -210,7 +248,10 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
         (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString();
     final paymentMode =
         (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString();
-    final amount = _safeToDouble(data['grandTotal']);
+    final amount = _safeToDouble(
+      data['grandTotal'],
+      fallback: _safeToDouble(data['total']),
+    );
     final status = (data['status'] ?? 'Success').toString();
     final receiptUrl = (data['publicReceiptUrl'] as String?)?.trim() ?? '';
     final hasReceiptUrl = receiptUrl.isNotEmpty;
@@ -355,10 +396,6 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                   children: [
                     Row(
                       children: [
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.arrow_back_ios_new),
-                        ),
                         const Expanded(
                           child: Text(
                             'Transaction History',
@@ -369,7 +406,20 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 48),
+                        PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'audit') {
+                              _openDailyAudit(store);
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem<String>(
+                              value: 'audit',
+                              child: Text('Daily Audit (Z-Reading)'),
+                            ),
+                          ],
+                          icon: const Icon(Icons.more_vert),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -398,7 +448,11 @@ class _TransactionHistoryDailyScreenState extends State<TransactionHistory> {
                           final totalSales = docs.fold<double>(
                             0,
                             (sum, doc) =>
-                                sum + _safeToDouble(doc.data()['grandTotal']),
+                                sum +
+                                _safeToDouble(
+                                  doc.data()['grandTotal'],
+                                  fallback: _safeToDouble(doc.data()['total']),
+                                ),
                           );
 
                           return Column(

@@ -21,6 +21,20 @@ class StorePaymentConfig {
   bool get gcashUsable => gcashEnabled && gcashQrUrl.trim().isNotEmpty;
 }
 
+class TaxSummary {
+  final double subtotal;
+  final double taxableSales;
+  final double taxAmount;
+  final double total;
+
+  const TaxSummary({
+    required this.subtotal,
+    required this.taxableSales,
+    required this.taxAmount,
+    required this.total,
+  });
+}
+
 class CartItem {
   final String itemId;
   final String name;
@@ -72,6 +86,11 @@ class _TransactionScreenState extends State<TransactionScreen>
   String? _lastScannedCode;
   DateTime? _lastScannedAt;
 
+  bool _taxEnabled = false;
+  String _taxName = 'VAT';
+  double _taxRate = 12.0;
+  bool _taxInclusive = true;
+
   @override
   void initState() {
     super.initState();
@@ -79,6 +98,7 @@ class _TransactionScreenState extends State<TransactionScreen>
 
     SchedulerBinding.instance.addPostFrameCallback((_) {
       _syncScannerState();
+      _loadTaxSettings();
     });
   }
 
@@ -95,6 +115,7 @@ class _TransactionScreenState extends State<TransactionScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _syncScannerState();
+      _loadTaxSettings();
     } else {
       _safeStopScanner();
     }
@@ -157,6 +178,16 @@ class _TransactionScreenState extends State<TransactionScreen>
     return int.tryParse(value?.toString() ?? '0') ?? 0;
   }
 
+  double _safeToDouble(dynamic value, {double fallback = 0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  String _formatRate(double value) {
+    if (value % 1 == 0) return value.toStringAsFixed(0);
+    return value.toStringAsFixed(2);
+  }
+
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('Not logged in.');
@@ -173,9 +204,71 @@ class _TransactionScreenState extends State<TransactionScreen>
     return storeId;
   }
 
+  Future<void> _loadTaxSettings() async {
+    try {
+      final storeId = await _requireStoreId();
+      final storeDoc = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .get();
+
+      final data = storeDoc.data() ?? {};
+
+      if (!mounted) return;
+      setState(() {
+        _taxEnabled = (data['tax_enabled'] as bool?) ?? false;
+        _taxName = ((data['tax_name'] ?? 'VAT').toString().trim().isEmpty)
+            ? 'VAT'
+            : (data['tax_name'] ?? 'VAT').toString().trim();
+        _taxRate = _safeToDouble(data['tax_rate'], fallback: 12.0);
+        _taxInclusive = (data['tax_inclusive'] as bool?) ?? true;
+      });
+    } catch (e) {
+      debugPrint('LOAD TAX SETTINGS ERROR: $e');
+    }
+  }
+
   double get subtotal => _cart.fold(0, (t, i) => t + i.total);
-  double get vat12 => subtotal * 0.12;
-  double get grandTotal => subtotal + vat12;
+
+  TaxSummary get taxSummary => _computeTaxSummary(subtotal);
+
+  double get taxAmount => taxSummary.taxAmount;
+  double get grandTotal => taxSummary.total;
+  double get taxableSales => taxSummary.taxableSales;
+
+  TaxSummary _computeTaxSummary(double baseSubtotal) {
+    if (!_taxEnabled || _taxRate <= 0) {
+      return TaxSummary(
+        subtotal: baseSubtotal,
+        taxableSales: baseSubtotal,
+        taxAmount: 0,
+        total: baseSubtotal,
+      );
+    }
+
+    final rate = _taxRate / 100;
+
+    if (_taxInclusive) {
+      final taxable = baseSubtotal / (1 + rate);
+      final tax = baseSubtotal - taxable;
+
+      return TaxSummary(
+        subtotal: baseSubtotal,
+        taxableSales: taxable,
+        taxAmount: tax,
+        total: baseSubtotal,
+      );
+    }
+
+    final tax = baseSubtotal * rate;
+
+    return TaxSummary(
+      subtotal: baseSubtotal,
+      taxableSales: baseSubtotal,
+      taxAmount: tax,
+      total: baseSubtotal + tax,
+    );
+  }
 
   void _resetSearchUi() {
     _searchController.clear();
@@ -794,9 +887,10 @@ class _TransactionScreenState extends State<TransactionScreen>
 
     try {
       final storeId = await _requireStoreId();
+      final summary = taxSummary;
 
       final change = paymentMode.toLowerCase() == 'cash'
-          ? (amountReceived - grandTotal)
+          ? (amountReceived - summary.total)
           : 0.0;
 
       final firestore = FirebaseFirestore.instance;
@@ -838,13 +932,18 @@ class _TransactionScreenState extends State<TransactionScreen>
         'storeName': config.storeName,
         'paymentMethod': paymentMode,
         'paymentMode': paymentMode,
-        'total': grandTotal,
+        'total': summary.total,
         'status': 'Success',
         'cashierUid': user.uid,
         'cashierName': cashierName,
-        'subtotal': subtotal,
-        'tax': vat12,
-        'grandTotal': grandTotal,
+        'subtotal': summary.subtotal,
+        'taxableSales': summary.taxableSales,
+        'taxEnabled': _taxEnabled,
+        'taxName': _taxName,
+        'taxRate': _taxRate,
+        'taxInclusive': _taxInclusive,
+        'tax': summary.taxAmount,
+        'grandTotal': summary.total,
         'amountReceived': amountReceived,
         'change': change,
         'items': itemsPayload,
@@ -931,9 +1030,14 @@ class _TransactionScreenState extends State<TransactionScreen>
         dateTime: now,
         paymentMode: paymentMode,
         cashierUid: user.uid,
-        subtotal: subtotal,
-        tax: vat12,
-        grandTotal: grandTotal,
+        subtotal: summary.subtotal,
+        taxableSales: summary.taxableSales,
+        taxEnabled: _taxEnabled,
+        taxName: _taxName,
+        taxRate: _taxRate,
+        taxInclusive: _taxInclusive,
+        tax: summary.taxAmount,
+        grandTotal: summary.total,
         amountReceived: amountReceived,
         change: change,
         items: _cart
@@ -1077,8 +1181,39 @@ class _TransactionScreenState extends State<TransactionScreen>
     );
   }
 
+  Widget _summaryRow(
+    String label,
+    String value, {
+    bool bold = false,
+    Color? valueColor,
+  }) {
+    final labelStyle = TextStyle(
+      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      fontSize: 14,
+    );
+
+    final valueStyle = TextStyle(
+      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      fontSize: 14,
+      color: valueColor,
+    );
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: labelStyle),
+        Text(value, style: valueStyle),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final summary = taxSummary;
+    final taxLabel = _taxInclusive
+        ? '$_taxName (${_formatRate(_taxRate)}% incl.)'
+        : '$_taxName (${_formatRate(_taxRate)}%)';
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7CBD0),
       body: SafeArea(
@@ -1262,37 +1397,23 @@ class _TransactionScreenState extends State<TransactionScreen>
                 ),
                 if (_cart.isNotEmpty) ...[
                   const Divider(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Sub Total'),
-                      Text('₱ ${subtotal.toStringAsFixed(2)}'),
-                    ],
+                  _summaryRow(
+                    'Sub Total',
+                    '₱ ${summary.subtotal.toStringAsFixed(2)}',
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Tax @ 12%'),
-                      Text('₱ ${vat12.toStringAsFixed(2)}'),
-                    ],
-                  ),
+                  if (_taxEnabled) ...[
+                    const SizedBox(height: 4),
+                    _summaryRow(
+                      taxLabel,
+                      '₱ ${summary.taxAmount.toStringAsFixed(2)}',
+                    ),
+                  ],
                   const Divider(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Grand Total',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        '₱ ${grandTotal.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green,
-                        ),
-                      ),
-                    ],
+                  _summaryRow(
+                    'Grand Total',
+                    '₱ ${summary.total.toStringAsFixed(2)}',
+                    bold: true,
+                    valueColor: Colors.green,
                   ),
                 ],
                 const SizedBox(height: 14),

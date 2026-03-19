@@ -28,6 +28,11 @@ class ReceiptData {
   final String cashierUid;
 
   final double subtotal;
+  final double taxableSales;
+  final bool taxEnabled;
+  final String taxName;
+  final double taxRate;
+  final bool taxInclusive;
   final double tax;
   final double grandTotal;
 
@@ -44,6 +49,11 @@ class ReceiptData {
     required this.paymentMode,
     required this.cashierUid,
     required this.subtotal,
+    required this.taxableSales,
+    required this.taxEnabled,
+    required this.taxName,
+    required this.taxRate,
+    required this.taxInclusive,
     required this.tax,
     required this.grandTotal,
     required this.amountReceived,
@@ -100,6 +110,17 @@ class ReceiptScreen extends StatelessWidget {
     return uid.substring(0, 6);
   }
 
+  String _formatRate(double value) {
+    if (value % 1 == 0) return value.toStringAsFixed(0);
+    return value.toStringAsFixed(2);
+  }
+
+  String _taxLabel() {
+    return data.taxInclusive
+        ? '${data.taxName} (${_formatRate(data.taxRate)}% incl.)'
+        : '${data.taxName} (${_formatRate(data.taxRate)}%)';
+  }
+
   String _shareText() {
     final b = StringBuffer();
     b.writeln(data.storeName);
@@ -115,7 +136,14 @@ class ReceiptScreen extends StatelessWidget {
 
     b.writeln('---');
     b.writeln('Subtotal: ${_money(data.subtotal)}');
-    b.writeln('Tax: ${_money(data.tax)}');
+
+    if (data.taxEnabled) {
+      if (data.taxInclusive) {
+        b.writeln('Taxable Sales: ${_money(data.taxableSales)}');
+      }
+      b.writeln('${_taxLabel()}: ${_money(data.tax)}');
+    }
+
     b.writeln('Grand Total: ${_money(data.grandTotal)}');
 
     if (data.paymentMode.toLowerCase() == 'cash') {
@@ -208,7 +236,7 @@ class ReceiptScreen extends StatelessWidget {
                   width: 54,
                   height: 54,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.6),
+                    color: Colors.white.withOpacity(0.6),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
@@ -226,11 +254,11 @@ class ReceiptScreen extends StatelessWidget {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.92),
+                        color: Colors.white.withOpacity(0.92),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
+                            color: Colors.black.withOpacity(0.08),
                             blurRadius: 14,
                             offset: const Offset(0, 8),
                           ),
@@ -388,7 +416,10 @@ class ReceiptScreen extends StatelessWidget {
                                 ),
                           const Divider(height: 18),
                           _kv('Sub total', _money(data.subtotal)),
-                          _kv('Tax', _money(data.tax)),
+                          if (data.taxEnabled && data.taxInclusive)
+                            _kv('Taxable Sales', _money(data.taxableSales)),
+                          if (data.taxEnabled)
+                            _kv(_taxLabel(), _money(data.tax)),
                           const SizedBox(height: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -477,12 +508,15 @@ class ReceiptScreen extends StatelessWidget {
       fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
     );
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(k, style: style),
-        Text(v, style: style),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(k, style: style),
+          Text(v, style: style),
+        ],
+      ),
     );
   }
 

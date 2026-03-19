@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 
 enum DashboardFilter {
   thisWeek,
@@ -41,26 +42,6 @@ class DashboardRange {
   });
 }
 
-class DashboardSummaryData {
-  final String storeName;
-  final String filterLabel;
-  final String rangeLabel;
-  final double totalSales;
-  final int transactionCount;
-  final int totalProductsSold;
-  final DateTime generatedAt;
-
-  const DashboardSummaryData({
-    required this.storeName,
-    required this.filterLabel,
-    required this.rangeLabel,
-    required this.totalSales,
-    required this.transactionCount,
-    required this.totalProductsSold,
-    required this.generatedAt,
-  });
-}
-
 class DashboardBarData {
   final String label;
   final double value;
@@ -71,6 +52,172 @@ class DashboardBarData {
   });
 }
 
+class DashboardTaxRow {
+  final String taxName;
+  final double taxRate;
+  final bool taxInclusive;
+  final double taxableSales;
+  final double taxAmount;
+
+  const DashboardTaxRow({
+    required this.taxName,
+    required this.taxRate,
+    required this.taxInclusive,
+    required this.taxableSales,
+    required this.taxAmount,
+  });
+}
+
+class DashboardDailyAuditRow {
+  final DateTime date;
+  final int transactionCount;
+  final double grossSales;
+  final double taxableSales;
+  final double taxCollected;
+  final double cashSales;
+  final double gcashSales;
+
+  const DashboardDailyAuditRow({
+    required this.date,
+    required this.transactionCount,
+    required this.grossSales,
+    required this.taxableSales,
+    required this.taxCollected,
+    required this.cashSales,
+    required this.gcashSales,
+  });
+}
+
+class DashboardReportData {
+  final String storeName;
+  final String filterLabel;
+  final String rangeLabel;
+  final DateTime rangeStart;
+  final DateTime rangeEnd;
+  final DateTime generatedAt;
+
+  final double totalSales;
+  final double subtotalSales;
+  final double taxableSales;
+  final double taxCollected;
+  final double nonTaxSales;
+
+  final double cashSales;
+  final double gcashSales;
+  final double otherSales;
+  final double cashReceived;
+  final double changeGiven;
+  final double netCashKept;
+
+  final int transactionCount;
+  final int successCount;
+  final int nonSuccessCount;
+  final int totalProductsSold;
+  final int itemLineCount;
+
+  final List<DashboardTaxRow> taxRows;
+  final List<DashboardDailyAuditRow> dailyAuditRows;
+
+  const DashboardReportData({
+    required this.storeName,
+    required this.filterLabel,
+    required this.rangeLabel,
+    required this.rangeStart,
+    required this.rangeEnd,
+    required this.generatedAt,
+    required this.totalSales,
+    required this.subtotalSales,
+    required this.taxableSales,
+    required this.taxCollected,
+    required this.nonTaxSales,
+    required this.cashSales,
+    required this.gcashSales,
+    required this.otherSales,
+    required this.cashReceived,
+    required this.changeGiven,
+    required this.netCashKept,
+    required this.transactionCount,
+    required this.successCount,
+    required this.nonSuccessCount,
+    required this.totalProductsSold,
+    required this.itemLineCount,
+    required this.taxRows,
+    required this.dailyAuditRows,
+  });
+}
+
+class _TaxBucket {
+  final String taxName;
+  final double taxRate;
+  final bool taxInclusive;
+  final double taxableSales;
+  final double taxAmount;
+
+  const _TaxBucket({
+    required this.taxName,
+    required this.taxRate,
+    required this.taxInclusive,
+    required this.taxableSales,
+    required this.taxAmount,
+  });
+
+  _TaxBucket copyWith({
+    String? taxName,
+    double? taxRate,
+    bool? taxInclusive,
+    double? taxableSales,
+    double? taxAmount,
+  }) {
+    return _TaxBucket(
+      taxName: taxName ?? this.taxName,
+      taxRate: taxRate ?? this.taxRate,
+      taxInclusive: taxInclusive ?? this.taxInclusive,
+      taxableSales: taxableSales ?? this.taxableSales,
+      taxAmount: taxAmount ?? this.taxAmount,
+    );
+  }
+}
+
+class _DailyBucket {
+  final DateTime date;
+  final int transactionCount;
+  final double grossSales;
+  final double taxableSales;
+  final double taxCollected;
+  final double cashSales;
+  final double gcashSales;
+
+  const _DailyBucket({
+    required this.date,
+    required this.transactionCount,
+    required this.grossSales,
+    required this.taxableSales,
+    required this.taxCollected,
+    required this.cashSales,
+    required this.gcashSales,
+  });
+
+  _DailyBucket copyWith({
+    DateTime? date,
+    int? transactionCount,
+    double? grossSales,
+    double? taxableSales,
+    double? taxCollected,
+    double? cashSales,
+    double? gcashSales,
+  }) {
+    return _DailyBucket(
+      date: date ?? this.date,
+      transactionCount: transactionCount ?? this.transactionCount,
+      grossSales: grossSales ?? this.grossSales,
+      taxableSales: taxableSales ?? this.taxableSales,
+      taxCollected: taxCollected ?? this.taxCollected,
+      cashSales: cashSales ?? this.cashSales,
+      gcashSales: gcashSales ?? this.gcashSales,
+    );
+  }
+}
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -79,7 +226,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Keep false for now to avoid heavy yearly reads
   static const bool allowYearly = false;
 
   late final Future<DashboardStoreContext> _storeFuture;
@@ -110,7 +256,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .doc(storeId)
         .get();
 
-    final storeName = (storeSnap.data()?['name'] ?? 'My Store').toString();
+    final storeData = storeSnap.data() ?? {};
+    final storeName =
+        (storeData['business_name'] ?? storeData['name'] ?? 'My Store')
+            .toString();
 
     return DashboardStoreContext(
       storeId: storeId,
@@ -122,7 +271,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Monday-based week
     final startThisWeek = today.subtract(Duration(days: today.weekday - 1));
     final endThisWeek = startThisWeek.add(const Duration(days: 7));
 
@@ -214,6 +362,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '₱${value.toStringAsFixed(0)}';
   }
 
+  double _safeToDouble(dynamic value, {double fallback = 0.0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
+  }
+
+  DateTime _txDate(Map<String, dynamic> data) {
+    final ts = data['createdAt'];
+    if (ts is Timestamp) return ts.toDate();
+
+    final local = data['createdAtLocal'];
+    if (local is String) {
+      final parsed = DateTime.tryParse(local);
+      if (parsed != null) return parsed;
+    }
+
+    return DateTime.now();
+  }
+
+  String _dateKey(DateTime d) {
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  String _selectedFilterLabel() {
+    switch (_selectedFilter) {
+      case DashboardFilter.thisWeek:
+        return 'This Week';
+      case DashboardFilter.lastWeek:
+        return 'Last Week';
+      case DashboardFilter.monthly:
+        return 'Monthly';
+      case DashboardFilter.yearly:
+        return 'Yearly';
+    }
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
+
   int _sumProducts(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     int total = 0;
 
@@ -228,6 +425,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
             total += (map['qty'] as num?)?.toInt() ?? 0;
           }
         }
+      }
+    }
+
+    return total;
+  }
+
+  int _countItemLines(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    int total = 0;
+
+    for (final doc in docs) {
+      final rawItems = doc.data()['items'];
+      if (rawItems is List) {
+        total += rawItems.length;
       }
     }
 
@@ -262,44 +472,222 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return items;
   }
 
-  String _selectedFilterLabel() {
-    switch (_selectedFilter) {
-      case DashboardFilter.thisWeek:
-        return 'This Week';
-      case DashboardFilter.lastWeek:
-        return 'Last Week';
-      case DashboardFilter.monthly:
-        return 'Monthly';
-      case DashboardFilter.yearly:
-        return 'Yearly';
+  DashboardReportData _buildReportData({
+    required DashboardStoreContext store,
+    required DashboardRange range,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  }) {
+    double totalSales = 0;
+    double subtotalSales = 0;
+    double taxableSalesTotal = 0;
+    double taxCollected = 0;
+    double nonTaxSales = 0;
+
+    double cashSales = 0;
+    double gcashSales = 0;
+    double otherSales = 0;
+    double cashReceived = 0;
+    double changeGiven = 0;
+
+    int transactionCount = 0;
+    int successCount = 0;
+    int nonSuccessCount = 0;
+    final totalProductsSold = _sumProducts(docs);
+    final itemLineCount = _countItemLines(docs);
+
+    final Map<String, _TaxBucket> taxMap = {};
+    final Map<String, _DailyBucket> dailyMap = {};
+
+    for (final doc in docs) {
+      final data = doc.data();
+
+      final subtotal = _safeToDouble(data['subtotal']);
+      final total = _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      );
+      final tax = _safeToDouble(
+        data['tax'],
+        fallback: _safeToDouble(data['taxAmount']),
+      );
+
+      final taxEnabled = (data['taxEnabled'] as bool?) ?? (tax > 0);
+      final taxInclusive = (data['taxInclusive'] as bool?) ?? true;
+      final taxName = (data['taxName'] ?? 'VAT').toString();
+      final taxRate = _safeToDouble(data['taxRate'], fallback: 12.0);
+
+      final taxableSales = _safeToDouble(
+        data['taxableSales'],
+        fallback: taxEnabled
+            ? (taxInclusive ? (subtotal - tax) : subtotal)
+            : subtotal,
+      );
+
+      final paymentMode =
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash')
+              .toString()
+              .toLowerCase();
+
+      final amountReceived = _safeToDouble(data['amountReceived']);
+      final change = _safeToDouble(data['change']);
+
+      final status = (data['status'] ?? 'Success').toString();
+      final isSuccess = status.toLowerCase() == 'success';
+
+      final txDate = _txDate(data);
+      final dayKey = _dateKey(DateTime(txDate.year, txDate.month, txDate.day));
+
+      transactionCount += 1;
+      if (isSuccess) {
+        successCount += 1;
+      } else {
+        nonSuccessCount += 1;
+      }
+
+      totalSales += total;
+      subtotalSales += subtotal;
+
+      if (taxEnabled) {
+        taxableSalesTotal += taxableSales;
+        taxCollected += tax;
+
+        final taxKey = '$taxName|${taxRate.toStringAsFixed(4)}|$taxInclusive';
+
+        taxMap.putIfAbsent(
+          taxKey,
+          () => _TaxBucket(
+            taxName: taxName,
+            taxRate: taxRate,
+            taxInclusive: taxInclusive,
+            taxableSales: 0,
+            taxAmount: 0,
+          ),
+        );
+
+        final bucket = taxMap[taxKey]!;
+        taxMap[taxKey] = bucket.copyWith(
+          taxableSales: bucket.taxableSales + taxableSales,
+          taxAmount: bucket.taxAmount + tax,
+        );
+      } else {
+        nonTaxSales += total;
+      }
+
+      if (paymentMode == 'cash') {
+        cashSales += total;
+        cashReceived += amountReceived;
+        changeGiven += change;
+      } else if (paymentMode == 'gcash') {
+        gcashSales += total;
+      } else {
+        otherSales += total;
+      }
+
+      dailyMap.putIfAbsent(
+        dayKey,
+        () => _DailyBucket(
+          date: DateTime(txDate.year, txDate.month, txDate.day),
+          transactionCount: 0,
+          grossSales: 0,
+          taxableSales: 0,
+          taxCollected: 0,
+          cashSales: 0,
+          gcashSales: 0,
+        ),
+      );
+
+      final daily = dailyMap[dayKey]!;
+      dailyMap[dayKey] = daily.copyWith(
+        transactionCount: daily.transactionCount + 1,
+        grossSales: daily.grossSales + total,
+        taxableSales: daily.taxableSales + taxableSales,
+        taxCollected: daily.taxCollected + tax,
+        cashSales: daily.cashSales + (paymentMode == 'cash' ? total : 0),
+        gcashSales: daily.gcashSales + (paymentMode == 'gcash' ? total : 0),
+      );
     }
+
+    final taxRows = taxMap.values
+        .map(
+          (e) => DashboardTaxRow(
+            taxName: e.taxName,
+            taxRate: e.taxRate,
+            taxInclusive: e.taxInclusive,
+            taxableSales: e.taxableSales,
+            taxAmount: e.taxAmount,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.taxName.compareTo(b.taxName));
+
+    final dailyRows = dailyMap.values
+        .map(
+          (e) => DashboardDailyAuditRow(
+            date: e.date,
+            transactionCount: e.transactionCount,
+            grossSales: e.grossSales,
+            taxableSales: e.taxableSales,
+            taxCollected: e.taxCollected,
+            cashSales: e.cashSales,
+            gcashSales: e.gcashSales,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    return DashboardReportData(
+      storeName: store.storeName,
+      filterLabel: _selectedFilterLabel(),
+      rangeLabel: range.subtitle,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      generatedAt: DateTime.now(),
+      totalSales: totalSales,
+      subtotalSales: subtotalSales,
+      taxableSales: taxableSalesTotal,
+      taxCollected: taxCollected,
+      nonTaxSales: nonTaxSales,
+      cashSales: cashSales,
+      gcashSales: gcashSales,
+      otherSales: otherSales,
+      cashReceived: cashReceived,
+      changeGiven: changeGiven,
+      netCashKept: cashReceived - changeGiven,
+      transactionCount: transactionCount,
+      successCount: successCount,
+      nonSuccessCount: nonSuccessCount,
+      totalProductsSold: totalProductsSold,
+      itemLineCount: itemLineCount,
+      taxRows: taxRows,
+      dailyAuditRows: dailyRows,
+    );
   }
 
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
+  String _fmtRate(double value) {
+    if (value % 1 == 0) return value.toStringAsFixed(0);
+    return value.toStringAsFixed(2);
   }
 
   Future<void> _handleExport(
     DashboardExportAction action,
-    DashboardSummaryData summary,
+    DashboardReportData report,
   ) async {
     switch (action) {
       case DashboardExportAction.pdf:
-        await _exportSummaryPdf(summary);
+        await _exportSummaryPdf(report);
         break;
       case DashboardExportAction.csv:
-        await _copySummaryCsv(summary);
+        await _copySummaryCsv(report);
         break;
     }
   }
 
-  Future<void> _exportSummaryPdf(DashboardSummaryData summary) async {
+  Future<void> _exportSummaryPdf(DashboardReportData report) async {
     final doc = pw.Document();
 
     doc.addPage(
       pw.MultiPage(
+        margin: const pw.EdgeInsets.all(28),
         build: (context) => [
           pw.Text(
             'Sales Summary Report',
@@ -308,49 +696,213 @@ class _DashboardScreenState extends State<DashboardScreen> {
               fontWeight: pw.FontWeight.bold,
             ),
           ),
+          pw.SizedBox(height: 10),
+          pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.all(10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              border: pw.Border.all(color: PdfColors.grey400),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Store: ${report.storeName}'),
+                pw.Text('Filter: ${report.filterLabel}'),
+                pw.Text(
+                  'Range: ${_shortDate(report.rangeStart)} - ${_shortDate(report.rangeEnd.subtract(const Duration(days: 1)))}',
+                ),
+                pw.Text('Generated: ${report.generatedAt.toString()}'),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 14),
+          _pdfTable(
+            title: 'Summary Totals',
+            headers: const ['Metric', 'Value'],
+            rows: [
+              ['Total Sales', report.totalSales.toStringAsFixed(2)],
+              ['Subtotal Sales', report.subtotalSales.toStringAsFixed(2)],
+              ['Taxable Sales', report.taxableSales.toStringAsFixed(2)],
+              ['Tax Collected', report.taxCollected.toStringAsFixed(2)],
+              ['Non-Tax Sales', report.nonTaxSales.toStringAsFixed(2)],
+              ['Transactions', '${report.transactionCount}'],
+              ['Successful Transactions', '${report.successCount}'],
+              ['Non-Success Transactions', '${report.nonSuccessCount}'],
+              ['Total Products Sold', '${report.totalProductsSold}'],
+              ['Item Lines', '${report.itemLineCount}'],
+            ],
+          ),
           pw.SizedBox(height: 12),
-          pw.Text('Store: ${summary.storeName}'),
-          pw.Text('Filter: ${summary.filterLabel}'),
-          pw.Text('Range: ${summary.rangeLabel}'),
-          pw.Text('Generated: ${summary.generatedAt}'),
-          pw.SizedBox(height: 16),
-          pw.Divider(),
-          pw.SizedBox(height: 8),
-          pw.Text('Total Sales: PHP ${summary.totalSales.toStringAsFixed(2)}'),
-          pw.Text('Transactions: ${summary.transactionCount}'),
-          pw.Text('Total Products Sold: ${summary.totalProductsSold}'),
+          _pdfTable(
+            title: 'Payment Breakdown',
+            headers: const ['Payment Type', 'Amount'],
+            rows: [
+              ['Cash Sales', report.cashSales.toStringAsFixed(2)],
+              ['GCash Sales', report.gcashSales.toStringAsFixed(2)],
+              ['Other Sales', report.otherSales.toStringAsFixed(2)],
+              ['Cash Received', report.cashReceived.toStringAsFixed(2)],
+              ['Change Given', report.changeGiven.toStringAsFixed(2)],
+              ['Net Cash Kept', report.netCashKept.toStringAsFixed(2)],
+            ],
+          ),
+          pw.SizedBox(height: 12),
+          _pdfTable(
+            title: 'Tax Breakdown',
+            headers: const [
+              'Tax Name',
+              'Rate',
+              'Type',
+              'Taxable Sales',
+              'Tax Amount'
+            ],
+            rows: report.taxRows.isEmpty
+                ? [
+                    ['No tax data', '-', '-', '0.00', '0.00'],
+                  ]
+                : report.taxRows
+                    .map((e) => [
+                          e.taxName,
+                          '${_fmtRate(e.taxRate)}%',
+                          e.taxInclusive ? 'Inclusive' : 'Exclusive',
+                          e.taxableSales.toStringAsFixed(2),
+                          e.taxAmount.toStringAsFixed(2),
+                        ])
+                    .toList(),
+          ),
+          pw.SizedBox(height: 12),
+          _pdfTable(
+            title: 'Daily Audit Breakdown',
+            headers: const [
+              'Date',
+              'Transactions',
+              'Gross Sales',
+              'Taxable Sales',
+              'Tax',
+              'Cash',
+              'GCash'
+            ],
+            rows: report.dailyAuditRows.isEmpty
+                ? [
+                    ['No data', '0', '0.00', '0.00', '0.00', '0.00', '0.00'],
+                  ]
+                : report.dailyAuditRows
+                    .map((e) => [
+                          _shortDate(e.date),
+                          '${e.transactionCount}',
+                          e.grossSales.toStringAsFixed(2),
+                          e.taxableSales.toStringAsFixed(2),
+                          e.taxCollected.toStringAsFixed(2),
+                          e.cashSales.toStringAsFixed(2),
+                          e.gcashSales.toStringAsFixed(2),
+                        ])
+                    .toList(),
+          ),
         ],
       ),
     );
 
     await Printing.layoutPdf(
       onLayout: (format) async => doc.save(),
+      name:
+          'sales_summary_${_dateKey(report.rangeStart)}_${_dateKey(report.rangeEnd.subtract(const Duration(days: 1)))}.pdf',
     );
   }
 
-  Future<void> _copySummaryCsv(DashboardSummaryData summary) async {
-    final csv = [
-      'Store,Filter,Range,Total Sales,Transactions,Total Products Sold,Generated At',
-      '"${summary.storeName}","${summary.filterLabel}","${summary.rangeLabel}","${summary.totalSales.toStringAsFixed(2)}","${summary.transactionCount}","${summary.totalProductsSold}","${summary.generatedAt.toIso8601String()}"',
-    ].join('\n');
-
-    await Clipboard.setData(ClipboardData(text: csv));
-
-    if (!mounted) return;
-    _showSnack('CSV summary copied to clipboard.');
+  pw.Widget _pdfTable({
+    required String title,
+    required List<String> headers,
+    required List<List<String>> rows,
+  }) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey400),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            title,
+            style: pw.TextStyle(
+              fontSize: 14,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.TableHelper.fromTextArray(
+            headers: headers,
+            data: rows,
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.white,
+              fontSize: 10,
+            ),
+            headerDecoration: const pw.BoxDecoration(
+              color: PdfColors.blueGrey700,
+            ),
+            cellStyle: const pw.TextStyle(fontSize: 9),
+            cellPadding: const pw.EdgeInsets.all(6),
+            cellAlignments: {
+              for (int i = 0; i < headers.length; i++)
+                i: i == 0 ? pw.Alignment.centerLeft : pw.Alignment.centerRight,
+            },
+          ),
+        ],
+      ),
+    );
   }
 
-  DateTime _txDate(Map<String, dynamic> data) {
-    final ts = data['createdAt'];
-    if (ts is Timestamp) return ts.toDate();
+  Future<void> _copySummaryCsv(DashboardReportData report) async {
+    final lines = <String>[
+      'SUMMARY TOTALS',
+      'Metric,Value',
+      'Store,"${report.storeName}"',
+      'Filter,"${report.filterLabel}"',
+      'Range,"${_shortDate(report.rangeStart)} - ${_shortDate(report.rangeEnd.subtract(const Duration(days: 1)))}"',
+      'Generated At,"${report.generatedAt.toIso8601String()}"',
+      'Total Sales,"${report.totalSales.toStringAsFixed(2)}"',
+      'Subtotal Sales,"${report.subtotalSales.toStringAsFixed(2)}"',
+      'Taxable Sales,"${report.taxableSales.toStringAsFixed(2)}"',
+      'Tax Collected,"${report.taxCollected.toStringAsFixed(2)}"',
+      'Non-Tax Sales,"${report.nonTaxSales.toStringAsFixed(2)}"',
+      'Transactions,"${report.transactionCount}"',
+      'Successful Transactions,"${report.successCount}"',
+      'Non-Success Transactions,"${report.nonSuccessCount}"',
+      'Total Products Sold,"${report.totalProductsSold}"',
+      'Item Lines,"${report.itemLineCount}"',
+      '',
+      'PAYMENT BREAKDOWN',
+      'Payment Type,Amount',
+      'Cash Sales,"${report.cashSales.toStringAsFixed(2)}"',
+      'GCash Sales,"${report.gcashSales.toStringAsFixed(2)}"',
+      'Other Sales,"${report.otherSales.toStringAsFixed(2)}"',
+      'Cash Received,"${report.cashReceived.toStringAsFixed(2)}"',
+      'Change Given,"${report.changeGiven.toStringAsFixed(2)}"',
+      'Net Cash Kept,"${report.netCashKept.toStringAsFixed(2)}"',
+      '',
+      'TAX BREAKDOWN',
+      'Tax Name,Rate,Type,Taxable Sales,Tax Amount',
+      if (report.taxRows.isEmpty) 'No tax data,-,-,0.00,0.00',
+      ...report.taxRows.map(
+        (e) =>
+            '"${e.taxName}","${_fmtRate(e.taxRate)}%","${e.taxInclusive ? 'Inclusive' : 'Exclusive'}","${e.taxableSales.toStringAsFixed(2)}","${e.taxAmount.toStringAsFixed(2)}"',
+      ),
+      '',
+      'DAILY AUDIT BREAKDOWN',
+      'Date,Transactions,Gross Sales,Taxable Sales,Tax,Cash,GCash',
+      if (report.dailyAuditRows.isEmpty) 'No data,0,0.00,0.00,0.00,0.00,0.00',
+      ...report.dailyAuditRows.map(
+        (e) =>
+            '"${_shortDate(e.date)}","${e.transactionCount}","${e.grossSales.toStringAsFixed(2)}","${e.taxableSales.toStringAsFixed(2)}","${e.taxCollected.toStringAsFixed(2)}","${e.cashSales.toStringAsFixed(2)}","${e.gcashSales.toStringAsFixed(2)}"',
+      ),
+    ];
 
-    final local = data['createdAtLocal'];
-    if (local is String) {
-      final parsed = DateTime.tryParse(local);
-      if (parsed != null) return parsed;
-    }
+    await Clipboard.setData(ClipboardData(text: lines.join('\n')));
 
-    return DateTime.now();
+    if (!mounted) return;
+    _showSnack('Detailed CSV summary copied to clipboard.');
   }
 
   List<DashboardBarData> _buildGraphData(
@@ -366,7 +918,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         for (final doc in docs) {
           final data = doc.data();
           final date = _txDate(data);
-          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+          final amount = _safeToDouble(
+            data['grandTotal'],
+            fallback: _safeToDouble(data['total']),
+          );
 
           final index = date.difference(range.start).inDays;
           if (index >= 0 && index < 7) {
@@ -386,7 +941,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         for (final doc in docs) {
           final data = doc.data();
           final date = _txDate(data);
-          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+          final amount = _safeToDouble(
+            data['grandTotal'],
+            fallback: _safeToDouble(data['total']),
+          );
 
           int weekIndex = ((date.day - 1) ~/ 7);
           if (weekIndex > 4) weekIndex = 4;
@@ -419,7 +977,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         for (final doc in docs) {
           final data = doc.data();
           final date = _txDate(data);
-          final amount = (data['grandTotal'] as num?)?.toDouble() ?? 0;
+          final amount = _safeToDouble(
+            data['grandTotal'],
+            fallback: _safeToDouble(data['total']),
+          );
 
           final index = date.month - 1;
           if (index >= 0 && index < 12) {
@@ -541,6 +1102,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  List<Widget> _buildRecentTransactions(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final displayDocs = docs.length > 5 ? docs.take(5).toList() : docs;
+
+    return displayDocs.map((doc) {
+      final data = doc.data();
+      final invoiceId =
+          (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString();
+      final amount = _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      );
+      final paymentMode =
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString();
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.75),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.receipt_long,
+              color: Color(0xFF0E6C73),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Invoice #$invoiceId',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    paymentMode,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              _money(amount),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final range = _currentRange();
@@ -613,31 +1238,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     }
 
                     final docs = txSnap.data?.docs ?? [];
-
-                    final totalSales = docs.fold<double>(
-                      0,
-                      (sum, doc) =>
-                          sum +
-                          ((doc.data()['grandTotal'] as num?)?.toDouble() ?? 0),
-                    );
-
-                    final transactionCount = docs.length;
-                    final totalProductsSold = _sumProducts(docs);
-
-                    final summary = DashboardSummaryData(
-                      storeName: store.storeName,
-                      filterLabel: _selectedFilterLabel(),
-                      rangeLabel: range.subtitle,
-                      totalSales: totalSales,
-                      transactionCount: transactionCount,
-                      totalProductsSold: totalProductsSold,
-                      generatedAt: DateTime.now(),
+                    final report = _buildReportData(
+                      store: store,
+                      range: range,
+                      docs: docs,
                     );
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Header
                         Row(
                           children: [
                             Container(
@@ -670,9 +1279,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                             PopupMenuButton<DashboardExportAction>(
                               tooltip: 'Export summary',
-                              icon: const Icon(Icons.note_alt_outlined),
+                              icon: const Icon(Icons.more_vert),
                               onSelected: (value) async {
-                                await _handleExport(value, summary);
+                                await _handleExport(value, report);
                               },
                               itemBuilder: (context) => const [
                                 PopupMenuItem(
@@ -687,244 +1296,195 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 18),
-
-                        const Text(
-                          'Your Dashboard',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
                         const SizedBox(height: 12),
-
-                        // Top total sales card
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
-                                blurRadius: 8,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      range.title,
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      _money(totalSales),
-                                      style: const TextStyle(
-                                        fontSize: 30,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      range.subtitle,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black12,
-                                      blurRadius: 6,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(Icons.add, size: 28),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // Stats row
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _statCard(
-                                title: 'Total Product Sold',
-                                value: '$totalProductsSold',
-                                smallNote: transactionCount > 0
-                                    ? 'Updated live'
-                                    : 'No sales yet',
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _statCard(
-                                title: 'Transactions',
-                                value: '$transactionCount',
-                                smallNote: 'For selected period',
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 18),
-
-                        // Summary header + dropdown
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                'Summary Reports',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0E6C73),
-                                ),
-                              ),
-                            ),
-                            Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.08),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<DashboardFilter>(
-                                  value: _selectedFilter,
-                                  borderRadius: BorderRadius.circular(12),
-                                  items: _filterItems(),
-                                  onChanged: (value) {
-                                    if (value == null) return;
-                                    setState(() => _selectedFilter = value);
-                                  },
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // Graph
-                        _buildSummaryGraph(docs, range),
-
-                        if (!allowYearly) ...[
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Yearly view is disabled for now to avoid loading too many transaction records.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.black54,
-                            ),
-                          ),
-                        ],
-
-                        const SizedBox(height: 14),
-
                         Expanded(
-                          child: docs.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No sales found for this selected period.',
-                                    style: TextStyle(color: Colors.black54),
-                                    textAlign: TextAlign.center,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Your Dashboard',
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
                                   ),
-                                )
-                              : ListView.separated(
-                                  itemCount: docs.length > 5 ? 5 : docs.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 8),
-                                  itemBuilder: (context, index) {
-                                    final data = docs[index].data();
-                                    final invoiceId =
-                                        (data['invoiceId'] ?? docs[index].id)
-                                            .toString();
-                                    final amount = (data['grandTotal'] as num?)
-                                            ?.toDouble() ??
-                                        0;
-                                    final paymentMode =
-                                        (data['paymentMode'] ?? 'Cash')
-                                            .toString();
-
-                                    return Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.75),
-                                        borderRadius: BorderRadius.circular(12),
+                                ),
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.06),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 4),
                                       ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.receipt_long,
-                                            color: Color(0xFF0E6C73),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'Invoice #$invoiceId',
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  paymentMode,
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.black54,
-                                                  ),
-                                                ),
-                                              ],
+                                    ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              range.title,
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                color: Colors.black87,
+                                              ),
                                             ),
-                                          ),
-                                          Text(
-                                            _money(amount),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              _money(report.totalSales),
+                                              style: const TextStyle(
+                                                fontSize: 30,
+                                                fontWeight: FontWeight.w800,
+                                              ),
                                             ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              range.subtitle,
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black12,
+                                              blurRadius: 6,
+                                              offset: Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: const Icon(Icons.add, size: 28),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _statCard(
+                                        title: 'Total Product Sold',
+                                        value: '${report.totalProductsSold}',
+                                        smallNote: report.transactionCount > 0
+                                            ? 'Updated live'
+                                            : 'No sales yet',
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _statCard(
+                                        title: 'Transactions',
+                                        value: '${report.transactionCount}',
+                                        smallNote: 'For selected period',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 18),
+                                Row(
+                                  children: [
+                                    const Expanded(
+                                      child: Text(
+                                        'Summary Reports',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF0E6C73),
+                                        ),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(10),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.08),
+                                            blurRadius: 6,
+                                            offset: const Offset(0, 2),
                                           ),
                                         ],
                                       ),
-                                    );
-                                  },
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<DashboardFilter>(
+                                          value: _selectedFilter,
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          items: _filterItems(),
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            setState(
+                                                () => _selectedFilter = value);
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                                const SizedBox(height: 12),
+                                _buildSummaryGraph(docs, range),
+                                if (!allowYearly) ...[
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Yearly view is disabled for now to avoid loading too many transaction records.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 14),
+                                _summaryInfoCard(report),
+                                const SizedBox(height: 14),
+                                if (docs.isEmpty)
+                                  const Center(
+                                    child: Padding(
+                                      padding:
+                                          EdgeInsets.symmetric(vertical: 24),
+                                      child: Text(
+                                        'No sales found for this selected period.',
+                                        style: TextStyle(color: Colors.black54),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  )
+                                else ...[
+                                  const Text(
+                                    'Recent Transactions',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0E6C73),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  ..._buildRecentTransactions(docs),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     );
@@ -934,6 +1494,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _summaryInfoCard(DashboardReportData report) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.88),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Quick Financial Summary',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0E6C73),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _quickRow('Total Sales', _money(report.totalSales)),
+          _quickRow('Taxable Sales', _money(report.taxableSales)),
+          _quickRow('Tax Collected', _money(report.taxCollected)),
+          _quickRow('Cash Sales', _money(report.cashSales)),
+          _quickRow('GCash Sales', _money(report.gcashSales)),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
       ),
     );
   }
