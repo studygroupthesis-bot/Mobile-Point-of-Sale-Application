@@ -370,7 +370,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'representationType':
             representation == RepresentationType.color ? 'color' : 'image',
         'colorValue': representation == RepresentationType.color
-            ? selectedColor.value
+            ? selectedColor.toARGB32()
             : null,
         'updated_at': FieldValue.serverTimestamp(),
       };
@@ -594,7 +594,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
                     children: colors.map((color) {
                       final isSelected =
                           representation == RepresentationType.color &&
-                              selectedColor.value == color.value;
+                              selectedColor.toARGB32() == color.toARGB32();
 
                       return GestureDetector(
                         onTap: () {
@@ -949,54 +949,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
                     _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
                   ],
                 ),
-<<<<<<< HEAD
-                const SizedBox(height: 14),
-                _buildLabel('Selling Price'),
-                TextFormField(
-                  controller: price,
-                  decoration: _fieldDecoration(hintText: 'Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Selling Price'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Cost'),
-                TextFormField(
-                  controller: cost,
-                  decoration: _fieldDecoration(hintText: 'Cost'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Cost'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Barcode'),
-                TextFormField(
-                  controller: barcode,
-                  decoration: _fieldDecoration(
-                    hintText: '',
-                    suffixIcon: const Icon(Icons.qr_code_2_rounded),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _buildStockActionSection(),
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: saving ? null : updateItem,
-                    child: saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text("SAVE CHANGES"),
-                  ),
-                ),
-              ],
-=======
-              ),
->>>>>>> JR
+              ]
             ),
           ),
         ),

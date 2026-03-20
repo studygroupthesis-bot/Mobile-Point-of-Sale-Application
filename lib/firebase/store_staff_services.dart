@@ -4,7 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import '/firebase/firebase_options.dart';
 
-class StoreMembersService {
+class StoreStaffService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   Future<String?> getMyStoreId() async {

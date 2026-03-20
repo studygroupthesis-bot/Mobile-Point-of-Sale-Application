@@ -334,7 +334,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         'representationType':
             _representationType == RepresentationType.color ? 'color' : 'image',
         'colorValue': _representationType == RepresentationType.color
-            ? _selectedColor.value
+            ? _selectedColor.toARGB32()
             : null,
         'imageUrl':
             _representationType == RepresentationType.image ? imageUrl : null,
@@ -515,7 +515,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     children: _availableColors.map((color) {
                       final isSelected =
                           _representationType == RepresentationType.color &&
-                              _selectedColor.value == color.value;
+                              _selectedColor.toARGB32() == color.toARGB32();
 
                       return GestureDetector(
                         onTap: () {
@@ -786,7 +786,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildLabel('Barcode'),
+        _buildBarcodeField(),
         TextFormField(
           controller: _barcodeController,
           decoration: _fieldDecoration(

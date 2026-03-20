@@ -6,6 +6,7 @@ import '../screens/dashboard/dashboard_screen.dart';
 import '../screens/sales/transaction_history.dart';
 import '../screens/transaction/transaction_screen.dart';
 import '../screens/inventory/inventory_screen.dart';
+import '../screens/inventory/staff_inventory_screen.dart';
 import '../screens/profile/profile_screen.dart';
 
 import 'navigation_bar.dart';
@@ -140,11 +141,13 @@ class _PopPayAppState extends State<PopPayApp> {
                   message: 'Your account does not have access to sales.',
                 ),
           canUseInventory
-              ? const InventoryScreen()
-              : const AccessDeniedScreen(
-                  title: 'Inventory Restricted',
-                  message: 'Your account does not have access to inventory.',
-                ),
+             ? (isAdmin
+                 ? const InventoryScreen()
+                 : StaffInventoryScreen())
+             : const AccessDeniedScreen(
+                 title: 'Inventory Restricted',
+                 message: 'Your account does not have access to inventory.',
+               ),
           const ProfileScreen(),
         ];
 

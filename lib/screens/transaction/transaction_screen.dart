@@ -638,12 +638,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
             currentStocks[cartItem.itemId] = currentStock;
           }
 
-<<<<<<< HEAD
-          final data = itemSnap.data() ?? {};
-          final currentStock = _safeToInt(data['stockQty']);
-=======
           debugPrint('ALL READS DONE');
->>>>>>> JR
 
           // WRITE TRANSACTION
           debugPrint('SETTING TRANSACTION DOC...');
@@ -725,13 +720,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
         }
       });
 
-<<<<<<< HEAD
-=======
       final verifySnap = await txRef.get();
       debugPrint('VERIFY TX EXISTS: ${verifySnap.exists}');
       debugPrint('VERIFY TX DATA: ${verifySnap.data()}');
 
->>>>>>> JR
       debugPrint('RUN TRANSACTION SUCCESS');
 
       final receipt = ReceiptData(
@@ -793,95 +785,6 @@ class _TransactionScreenState extends State<TransactionScreen> {
     }
   }
 
-<<<<<<< HEAD
-  Widget _buildScannerCard() {
-    return GestureDetector(
-      onTap: () async {
-        if (_loadingAdd || _processingCheckout || _scannerBusy) return;
-        await _scannerController.start();
-      },
-      child: Container(
-        height: 130,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              MobileScanner(
-                controller: _scannerController,
-                onDetect: _handleEmbeddedScan,
-              ),
-              Center(
-                child: Container(
-                  width: 220,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white, width: 2.5),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-              if (_loadingAdd || _scannerBusy)
-                Container(
-                  color: Colors.black26,
-                  alignment: Alignment.center,
-                  child: const SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _loadingAdd
-                        ? 'Looking up scanned item...'
-                        : _scannerBusy
-                            ? 'Processing scan...'
-                            : 'Align barcode inside the frame',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-=======
->>>>>>> JR
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -922,7 +825,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),

@@ -18,7 +18,7 @@ class AddEditUserScreen extends StatefulWidget {
 }
 
 class _AddEditUserScreenState extends State<AddEditUserScreen> {
-  final _svc = StoreMembersService();
+  final _svc = StoreStaffService();
 
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();

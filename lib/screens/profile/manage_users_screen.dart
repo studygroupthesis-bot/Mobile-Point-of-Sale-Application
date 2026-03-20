@@ -12,7 +12,7 @@ class ManageUsersScreen extends StatefulWidget {
 }
 
 class _ManageUsersScreenState extends State<ManageUsersScreen> {
-  final _svc = StoreMembersService();
+  final _svc = StoreStaffService();
   final _searchCtrl = TextEditingController();
 
   String? _storeId;
