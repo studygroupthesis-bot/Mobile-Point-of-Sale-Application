@@ -12,8 +12,6 @@ class StaffInventoryScreen extends StatefulWidget {
 class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   final TextEditingController _searchController = TextEditingController();
 
-  static const String _gradientAsset = 'assets/Gradient.png';
-
   String _selectedCategory = 'All';
   String _search = '';
 
@@ -21,6 +19,12 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   final Map<String, int> _cart = {};
 
   late final Future<_StaffStoreAccess> _storeAccessFuture;
+
+  // Basket + bottom nav reserved layout values
+  static const double _basketHeight = 56;
+  static const double _basketBottomOffset = 56;
+  static const double _reservedBottomSpace =
+      _basketHeight + _basketBottomOffset + 14;
 
   @override
   void initState() {
@@ -71,88 +75,23 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
         .get();
 
     final storeData = storeSnap.data() ?? {};
-    final storeName = (storeData['business_name'] ??
-            storeData['storeName'] ??
-            'Store')
+    final storeName =
+        (storeData['business_name'] ?? storeData['storeName'] ?? 'Store')
+            .toString()
+            .trim();
+
+    final storeLogoUrl = (storeData['logoUrl'] ??
+            storeData['storeLogoUrl'] ??
+            storeData['imageUrl'] ??
+            '')
         .toString()
         .trim();
 
     return _StaffStoreAccess(
       storeId: storeId,
       storeName: storeName.isEmpty ? 'Store' : storeName,
-    );
-  }
-
-  Widget _buildGradientBubble({
-    required double size,
-  }) {
-    return IgnorePointer(
-      child: Opacity(
-        opacity: 0.68,
-        child: Image.asset(
-          _gradientAsset,
-          width: size,
-          height: size,
-          fit: BoxFit.contain,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoadingScaffold() {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F6),
-      body: Stack(
-        children: [
-          Positioned(
-            top: -40,
-            left: -70,
-            child: _buildGradientBubble(size: 220),
-          ),
-          Positioned(
-            bottom: 120,
-            right: -80,
-            child: _buildGradientBubble(size: 240),
-          ),
-          const SafeArea(
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMessageScaffold(String message) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F6),
-      body: Stack(
-        children: [
-          Positioned(
-            top: -40,
-            left: -70,
-            child: _buildGradientBubble(size: 220),
-          ),
-          Positioned(
-            bottom: 120,
-            right: -80,
-            child: _buildGradientBubble(size: 240),
-          ),
-          SafeArea(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.black87),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+      role: role,
+      storeLogoUrl: storeLogoUrl,
     );
   }
 
@@ -225,6 +164,397 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
     };
   }
 
+  void _showMenuMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+  }
+
+  void _handleMenuAction(String value, _StaffStoreAccess access) {
+    final canManageInventory =
+        access.role == 'admin' || access.role == 'staff';
+
+    if (!canManageInventory) {
+      _showMenuMessage('You do not have permission to manage inventory.');
+      return;
+    }
+
+    switch (value) {
+      case 'add':
+        _showMenuMessage('Add Item clicked.');
+        break;
+      case 'edit':
+        _showMenuMessage('Edit Item clicked.');
+        break;
+      case 'delete':
+        _showMenuMessage('Delete Item clicked.');
+        break;
+    }
+  }
+
+  void _openCartSheet(List<InventoryItem> allItems) {
+    final parentContext = context;
+
+    showModalBottomSheet(
+      context: parentContext,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final media = MediaQuery.of(sheetContext);
+        final maxSheetHeight = media.size.height - media.padding.top - 8;
+        final desiredSheetHeight = media.size.height * 0.90;
+        final sheetHeight =
+            desiredSheetHeight > maxSheetHeight
+                ? maxSheetHeight
+                : desiredSheetHeight;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final selectedItems = allItems
+                .where((item) => (_cart[item.id] ?? 0) > 0)
+                .toList();
+
+            final totalItems = _totalItems;
+            final totalAmount = _totalAmount(allItems);
+
+            return SafeArea(
+              top: false,
+              bottom: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: media.viewInsets.bottom,
+                ),
+                child: Container(
+                  height: sheetHeight + media.padding.bottom,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(30),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 54,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: Colors.black12,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Cart',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Expanded(
+                        child: selectedItems.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'Your basket is empty.',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.black54,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              )
+                            : ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  0,
+                                  20,
+                                  20,
+                                ),
+                                itemCount: selectedItems.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 12),
+                                itemBuilder: (context, index) {
+                                  final item = selectedItems[index];
+                                  final qty = _cart[item.id] ?? 0;
+                                  final subtotal = item.price * qty;
+
+                                  return Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x14000000),
+                                          blurRadius: 14,
+                                          offset: Offset(0, 5),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        _ProductThumb(
+                                          item: item,
+                                          size: 62,
+                                          radius: 16,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                item.name,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                _peso(item.price),
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'Subtotal: ${_peso(subtotal)}',
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  color: Colors.black54,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFE9F6F4),
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              _CartQtyButton(
+                                                icon: Icons.remove,
+                                                onTap: () {
+                                                  _removeFromCart(item);
+                                                  setModalState(() {});
+                                                },
+                                              ),
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 8,
+                                                ),
+                                                child: Text(
+                                                  '$qty',
+                                                  style: const TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                              _CartQtyButton(
+                                                icon: Icons.add,
+                                                onTap: () {
+                                                  _addToCart(item);
+                                                  setModalState(() {});
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                      Container(
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          14,
+                          20,
+                          20 + media.padding.bottom,
+                        ),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(24),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0x10000000),
+                              blurRadius: 10,
+                              offset: Offset(0, -2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Items: $totalItems',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  _peso(totalAmount),
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF309E95),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 54,
+                              child: ElevatedButton(
+                                onPressed: selectedItems.isEmpty
+                                    ? null
+                                    : () {
+                                        Navigator.pop(sheetContext);
+                                        Navigator.push(
+                                          parentContext,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                StaffTransactionScreen(
+                                              allItems: allItems,
+                                              cart: Map<String, int>.from(
+                                                _cart,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF309E95),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Proceed to Transaction',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingScaffold() {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF2F5F5),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color(0xFFBFE9E3),
+              Color(0xFFF1F3F4),
+            ],
+          ),
+        ),
+        child: const SafeArea(
+          child: Center(
+            child: CircularProgressIndicator(
+              color: Color(0xFF309E95),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageScaffold(String message) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF2F5F5),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color(0xFFBFE9E3),
+              Color(0xFFF1F3F4),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final safeBottom = MediaQuery.of(context).padding.bottom;
@@ -245,362 +575,377 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
         final access = storeSnap.data!;
         final storeId = access.storeId;
         final storeName = access.storeName;
+        final canManageInventory =
+            access.role == 'admin' || access.role == 'staff';
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF0F4F6),
-          body: Stack(
-            children: [
-              Positioned(
-                top: -40,
-                left: -70,
-                child: _buildGradientBubble(size: 220),
+          backgroundColor: const Color(0xFFF2F5F5),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xFFBFE9E3),
+                  Color(0xFFF1F3F4),
+                ],
               ),
-              Positioned(
-                bottom: 120,
-                right: -80,
-                child: _buildGradientBubble(size: 240),
-              ),
-              SafeArea(
-                bottom: false,
-                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: FirebaseFirestore.instance
-                      .collection('stores')
-                      .doc(storeId)
-                      .collection('items')
-                      .orderBy('name')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Center(
-                        child: Text(
-                          'Error loading items:\n${snapshot.error}',
-                          textAlign: TextAlign.center,
-                        ),
-                      );
-                    }
+            ),
+            child: SafeArea(
+              bottom: false,
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('stores')
+                    .doc(storeId)
+                    .collection('items')
+                    .orderBy('name')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Error loading items:\n${snapshot.error}',
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
 
-                    if (!snapshot.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+                  if (!snapshot.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF309E95),
+                      ),
+                    );
+                  }
 
-                    final allItems = snapshot.data!.docs
-                        .map((doc) => InventoryItem.fromDoc(doc))
-                        .toList();
+                  final allItems = snapshot.data!.docs
+                      .map((doc) => InventoryItem.fromDoc(doc))
+                      .toList();
 
-                    final categories = <String>{
-                      'All',
-                      ...allItems
-                          .map(
-                            (e) => e.category.trim().isEmpty
-                                ? 'Uncategorized'
-                                : e.category.trim(),
-                          )
-                          .where((e) => e.isNotEmpty),
-                    }.toList()
-                      ..sort((a, b) {
-                        if (a == 'All') return -1;
-                        if (b == 'All') return 1;
-                        return a.toLowerCase().compareTo(b.toLowerCase());
-                      });
+                  final categories = <String>{
+                    'All',
+                    ...allItems
+                        .map(
+                          (e) => e.category.trim().isEmpty
+                              ? 'Uncategorized'
+                              : e.category.trim(),
+                        )
+                        .where((e) => e.isNotEmpty),
+                  }.toList()
+                    ..sort((a, b) {
+                      if (a == 'All') return -1;
+                      if (b == 'All') return 1;
+                      return a.toLowerCase().compareTo(b.toLowerCase());
+                    });
 
-                    final searchedItems = allItems.where((item) {
-                      if (_search.trim().isEmpty) return true;
-                      return item.name
-                          .toLowerCase()
-                          .contains(_search.toLowerCase());
-                    }).toList();
+                  final searchedItems = allItems.where((item) {
+                    if (_search.trim().isEmpty) return true;
 
-                    final sectionMap = _buildSections(searchedItems);
-                    final totalAmount = _totalAmount(allItems);
+                    return item.name
+                            .toLowerCase()
+                            .contains(_search.toLowerCase()) ||
+                        item.category
+                            .toLowerCase()
+                            .contains(_search.toLowerCase()) ||
+                        item.barcode
+                            .toLowerCase()
+                            .contains(_search.toLowerCase());
+                  }).toList();
 
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Inventory / Staff',
-                            style: TextStyle(
-                              color: Color(0xFFE9BCBC),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
+                  final sectionMap = _buildSections(searchedItems);
+                  final totalAmount = _totalAmount(allItems);
+
+                  return Stack(
+                    clipBehavior: Clip.hardEdge,
+                    children: [
+                      Positioned.fill(
+                        bottom: _reservedBottomSpace + safeBottom,
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(
+                            18,
+                            18,
+                            18,
+                            24,
                           ),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF2F4F5),
-                                borderRadius: BorderRadius.circular(22),
-                              ),
-                              child: Stack(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
-                                  SingleChildScrollView(
-                                    padding: EdgeInsets.fromLTRB(
-                                      14,
-                                      14,
-                                      14,
-                                      150 + safeBottom,
+                                  _StoreAvatar(
+                                    storeName: storeName,
+                                    storeLogoUrl: access.storeLogoUrl,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Text(
+                                      storeName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 26,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.black,
+                                        shadows: [
+                                          Shadow(
+                                            color: Color(0x22000000),
+                                            blurRadius: 8,
+                                            offset: Offset(0, 3),
+                                          ),
+                                        ],
+                                      ),
                                     ),
+                                  ),
+                                  if (canManageInventory)
+                                    PopupMenuButton<String>(
+                                      tooltip: 'Inventory actions',
+                                      onSelected: (value) {
+                                        _handleMenuAction(value, access);
+                                      },
+                                      itemBuilder: (context) => const [
+                                        PopupMenuItem<String>(
+                                          value: 'add',
+                                          child: Text('Add Item'),
+                                        ),
+                                        PopupMenuItem<String>(
+                                          value: 'edit',
+                                          child: Text('Edit Item'),
+                                        ),
+                                        PopupMenuItem<String>(
+                                          value: 'delete',
+                                          child: Text('Delete Item'),
+                                        ),
+                                      ],
+                                      icon: const Icon(
+                                        Icons.menu_rounded,
+                                        size: 34,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  else
+                                    const Icon(
+                                      Icons.lock_outline,
+                                      size: 28,
+                                      color: Colors.black45,
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 22),
+
+                              Container(
+                                height: 58,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF4F7F7),
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x20000000),
+                                      blurRadius: 10,
+                                      offset: Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: TextField(
+                                  controller: _searchController,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _search = value.trim();
+                                    });
+                                  },
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'Search',
+                                    hintStyle: TextStyle(
+                                      color: Colors.black.withOpacity(0.35),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    border: InputBorder.none,
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 18,
+                                    ),
+                                    suffixIcon: const Padding(
+                                      padding: EdgeInsets.only(right: 12),
+                                      child: Icon(
+                                        Icons.search_rounded,
+                                        size: 34,
+                                        color: Colors.black,
+                                      ),
+                                    ),
+                                    suffixIconConstraints:
+                                        const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(height: 28),
+                              const Text(
+                                'Categories',
+                                style: TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              SizedBox(
+                                height: 142,
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.only(right: 18),
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: categories.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 16),
+                                  itemBuilder: (context, index) {
+                                    final category = categories[index];
+                                    final selected =
+                                        _selectedCategory == category;
+
+                                    return _StaffCategoryCard(
+                                      category: category,
+                                      selected: selected,
+                                      items: allItems,
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedCategory = category;
+                                        });
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+
+                              const SizedBox(height: 18),
+
+                              if (sectionMap.isEmpty)
+                                const Padding(
+                                  padding:
+                                      EdgeInsets.symmetric(vertical: 50),
+                                  child: Center(
+                                    child: Text(
+                                      'No items found.',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.black54,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                ...sectionMap.entries.map((entry) {
+                                  final category = entry.key;
+                                  final items = entry.value;
+
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.only(bottom: 22),
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              width: 34,
-                                              height: 34,
-                                              decoration: const BoxDecoration(
-                                                color: Colors.white,
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: const Icon(
-                                                Icons.shopping_bag_rounded,
-                                                color: Color(0xFFE06AA8),
-                                                size: 18,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: Text(
-                                                storeName,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Color(0xFF153A39),
-                                                ),
-                                              ),
-                                            ),
-                                            IconButton(
-                                              onPressed: () {},
-                                              icon: const Icon(
-                                                Icons.menu_rounded,
-                                                size: 22,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 10),
-
-                                        Container(
-                                          height: 42,
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                          child: TextField(
-                                            controller: _searchController,
-                                            onChanged: (value) {
-                                              setState(() {
-                                                _search = value.trim();
-                                              });
-                                            },
-                                            decoration: const InputDecoration(
-                                              hintText: 'Search',
-                                              prefixIcon: Icon(
-                                                Icons.search,
-                                                size: 20,
-                                              ),
-                                              border: InputBorder.none,
-                                              contentPadding:
-                                                  EdgeInsets.symmetric(
-                                                vertical: 10,
-                                              ),
-                                            ),
+                                        Text(
+                                          category,
+                                          style: const TextStyle(
+                                            fontSize: 19,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.black,
                                           ),
                                         ),
-
-                                        const SizedBox(height: 12),
-
-                                        const Padding(
-                                          padding:
-                                              EdgeInsets.only(left: 2, bottom: 8),
-                                          child: Text(
-                                            'Categories',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                        ),
-
+                                        const SizedBox(height: 14),
                                         SizedBox(
-                                          height: 88,
+                                          height: 248,
                                           child: ListView.separated(
+                                            padding: const EdgeInsets.only(
+                                              right: 18,
+                                            ),
                                             scrollDirection: Axis.horizontal,
-                                            itemCount: categories.length,
+                                            itemCount: items.length,
                                             separatorBuilder: (_, __) =>
-                                                const SizedBox(width: 10),
+                                                const SizedBox(width: 16),
                                             itemBuilder: (context, index) {
-                                              final category = categories[index];
-                                              final selected =
-                                                  _selectedCategory == category;
+                                              final item = items[index];
+                                              final qty = _qtyOf(item.id);
 
-                                              return _StaffCategoryCard(
-                                                category: category,
-                                                selected: selected,
-                                                items: allItems,
-                                                onTap: () {
-                                                  setState(() {
-                                                    _selectedCategory = category;
-                                                  });
-                                                },
+                                              return _StaffItemCard(
+                                                item: item,
+                                                qty: qty,
+                                                onAdd: () =>
+                                                    _addToCart(item),
+                                                peso: _peso,
                                               );
                                             },
                                           ),
                                         ),
-
-                                        const SizedBox(height: 10),
-
-                                        if (sectionMap.isEmpty)
-                                          const Padding(
-                                            padding: EdgeInsets.symmetric(
-                                              vertical: 40,
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                'No items found.',
-                                                style: TextStyle(fontSize: 15),
-                                              ),
-                                            ),
-                                          )
-                                        else
-                                          ...sectionMap.entries.map((entry) {
-                                            final category = entry.key;
-                                            final items = entry.value;
-
-                                            return Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 16,
-                                              ),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    category,
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: Colors.black87,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 8),
-                                                  GridView.builder(
-                                                    shrinkWrap: true,
-                                                    physics:
-                                                        const NeverScrollableScrollPhysics(),
-                                                    itemCount: items.length,
-                                                    gridDelegate:
-                                                        const SliverGridDelegateWithFixedCrossAxisCount(
-                                                      crossAxisCount: 2,
-                                                      crossAxisSpacing: 10,
-                                                      mainAxisSpacing: 10,
-                                                      childAspectRatio: 0.83,
-                                                    ),
-                                                    itemBuilder:
-                                                        (context, index) {
-                                                      final item = items[index];
-                                                      final qty =
-                                                          _qtyOf(item.id);
-
-                                                      return _StaffItemCard(
-                                                        item: item,
-                                                        qty: qty,
-                                                        onAdd: () =>
-                                                            _addToCart(item),
-                                                        onRemove: () =>
-                                                            _removeFromCart(
-                                                          item,
-                                                        ),
-                                                        peso: _peso,
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          }),
                                       ],
                                     ),
-                                  ),
+                                  );
+                                }),
+                            ],
+                          ),
+                        ),
+                      ),
 
-                                  Positioned(
-                                    left: 14,
-                                    right: 14,
-                                    bottom: 100 + safeBottom,
-                                    child: GestureDetector(
-                                      onTap: _totalItems == 0
-                                          ? null
-                                          : () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      StaffTransactionScreen(
-                                                    allItems: allItems,
-                                                    cart: Map<String, int>.from(
-                                                      _cart,
-                                                    ),
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                      child: Opacity(
-                                        opacity: _totalItems == 0 ? 0.92 : 1,
-                                        child: Container(
-                                          height: 50,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 18,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF60C0B5),
-                                            borderRadius:
-                                                BorderRadius.circular(26),
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  'Basket - $_totalItems ${_totalItems == 1 ? 'Item' : 'Items'}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                              Text(
-                                                _peso(totalAmount),
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
+                      Positioned(
+                        left: 20,
+                        right: 20,
+                        bottom: _basketBottomOffset + safeBottom,
+                        child: GestureDetector(
+                          onTap: () => _openCartSheet(allItems),
+                          child: Container(
+                            height: _basketHeight,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 22),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF309E95),
+                              borderRadius: BorderRadius.circular(29),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x20000000),
+                                  blurRadius: 14,
+                                  offset: Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Basket - $_totalItems ${_totalItems == 1 ? 'Item' : 'Items'}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                                Text(
+                                  _peso(totalAmount),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    );
-                  },
-                ),
+                    ],
+                  );
+                },
               ),
-            ],
+            ),
           ),
         );
       },
@@ -611,11 +956,74 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
 class _StaffStoreAccess {
   final String storeId;
   final String storeName;
+  final String role;
+  final String storeLogoUrl;
 
   const _StaffStoreAccess({
     required this.storeId,
     required this.storeName,
+    required this.role,
+    required this.storeLogoUrl,
   });
+}
+
+class _StoreAvatar extends StatelessWidget {
+  final String storeName;
+  final String storeLogoUrl;
+
+  const _StoreAvatar({
+    required this.storeName,
+    required this.storeLogoUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initial =
+        storeName.trim().isEmpty ? 'S' : storeName.trim()[0].toUpperCase();
+
+    return Container(
+      width: 62,
+      height: 62,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: storeLogoUrl.isNotEmpty
+            ? Image.network(
+                storeLogoUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Center(
+                  child: Text(
+                    initial,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFB11C8E),
+                    ),
+                  ),
+                ),
+              )
+            : Center(
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFFB11C8E),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
 }
 
 class _StaffCategoryCard extends StatelessWidget {
@@ -633,21 +1041,22 @@ class _StaffCategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? const Color(0xFF79C6BC) : const Color(0xFFD7E9E7);
+    final bg = selected ? const Color(0xFF5A9896) : const Color(0xFFB0D8D6);
+    final fg = selected ? Colors.white : Colors.black;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 72,
-        padding: const EdgeInsets.all(6),
+        width: 118,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(14),
           boxShadow: const [
             BoxShadow(
-              color: Colors.black12,
-              blurRadius: 4,
-              offset: Offset(0, 2),
+              color: Color(0x22000000),
+              blurRadius: 8,
+              offset: Offset(0, 4),
             ),
           ],
         ),
@@ -659,9 +1068,8 @@ class _StaffCategoryCard extends StatelessWidget {
                 child: category == 'All'
                     ? Icon(
                         Icons.grid_view_rounded,
-                        size: 24,
-                        color:
-                            selected ? Colors.white : const Color(0xFF5AA9A0),
+                        size: 54,
+                        color: fg,
                       )
                     : _CategoryThumb(
                         category: category,
@@ -669,17 +1077,17 @@ class _StaffCategoryCard extends StatelessWidget {
                       ),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
               category,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color:
-                    selected ? Colors.white : const Color(0xFF34504C),
+                fontSize: 16,
+                height: 1.05,
+                fontWeight: FontWeight.w600,
+                color: fg,
               ),
             ),
           ],
@@ -693,168 +1101,200 @@ class _StaffItemCard extends StatelessWidget {
   final InventoryItem item;
   final int qty;
   final VoidCallback onAdd;
-  final VoidCallback onRemove;
   final String Function(num value) peso;
 
   const _StaffItemCard({
     required this.item,
     required this.qty,
     required this.onAdd,
-    required this.onRemove,
     required this.peso,
   });
 
   @override
   Widget build(BuildContext context) {
-    final stockText = item.stockQty?.toString() ?? '';
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFD7E9E7),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Center(
-                  child: item.imageUrl != null &&
-                          item.imageUrl!.trim().isNotEmpty
-                      ? Image.network(
-                          item.imageUrl!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) =>
-                              _FallbackItemVisual(item: item),
-                        )
-                      : _FallbackItemVisual(item: item),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                item.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                peso(item.price),
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
-          ),
-
-          if (stockText.isNotEmpty)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 18,
-                height: 18,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF60C0B5),
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  stockText,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
+    return SizedBox(
+      width: 176,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD8E1E5),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 10,
+              offset: Offset(0, 5),
             ),
-
-          Positioned(
-            right: 0,
-            top: 0,
-            child: qty == 0
-                ? InkWell(
-                    onTap: onAdd,
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFFF6B57),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.add,
-                        size: 14,
-                        color: Colors.white,
+          ],
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: _ProductThumb(
+                    item: item,
+                    size: 88,
+                    radius: 14,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    height: 1.12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  peso(item.price),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Row(
+                  children: [
+                    if (item.trackStock && item.stockQty != null)
+                      Text(
+                        'Stock: ${item.stockQty}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: onAdd,
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF33AAA0),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0x26000000),
+                              blurRadius: 8,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.add,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
                     ),
-                  )
-                : Container(
-                    height: 24,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
+                  ],
+                ),
+              ],
+            ),
+            if (qty > 0)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF309E95),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'x$qty',
+                    style: const TextStyle(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFF98AEAA)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        InkWell(
-                          onTap: onRemove,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 3),
-                            child: Text(
-                              '-',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '$qty',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        InkWell(
-                          onTap: onAdd,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 3),
-                            child: Text(
-                              '+',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductThumb extends StatelessWidget {
+  final InventoryItem item;
+  final double size;
+  final double radius;
+
+  const _ProductThumb({
+    required this.item,
+    required this.size,
+    required this.radius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.imageUrl != null && item.imageUrl!.trim().isNotEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Image.network(
+          item.imageUrl!,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _FallbackItemVisual(
+            item: item,
+            size: size,
+            radius: radius,
           ),
-        ],
+        ),
+      );
+    }
+
+    return _FallbackItemVisual(
+      item: item,
+      size: size,
+      radius: radius,
+    );
+  }
+}
+
+class _CartQtyButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _CartQtyButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: const BoxDecoration(
+          color: Color(0xFF309E95),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 18,
+        ),
       ),
     );
   }
@@ -862,28 +1302,40 @@ class _StaffItemCard extends StatelessWidget {
 
 class _FallbackItemVisual extends StatelessWidget {
   final InventoryItem item;
+  final double size;
+  final double radius;
 
-  const _FallbackItemVisual({required this.item});
+  const _FallbackItemVisual({
+    required this.item,
+    required this.size,
+    required this.radius,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (item.representationType == 'color' && item.colorValue != null) {
       return Container(
-        width: 48,
-        height: 48,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: Color(item.colorValue!),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(radius),
         ),
       );
     }
 
     return Container(
-      width: 48,
-      height: 48,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: const Color(0xFFD9D6D8),
-        borderRadius: BorderRadius.circular(8),
+        color: const Color(0xFFE7ECED),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.inventory_2_outlined,
+        color: Colors.black.withOpacity(0.35),
+        size: size * 0.42,
       ),
     );
   }
@@ -912,20 +1364,16 @@ class _CategoryThumb extends StatelessWidget {
     if (first == null) {
       return const Icon(
         Icons.category_outlined,
-        size: 22,
-        color: Color(0xFF5AA9A0),
+        size: 42,
+        color: Colors.black87,
       );
     }
 
-    if (first.imageUrl != null && first.imageUrl!.trim().isNotEmpty) {
-      return Image.network(
-        first.imageUrl!,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _FallbackItemVisual(item: first!),
-      );
-    }
-
-    return _FallbackItemVisual(item: first);
+    return _ProductThumb(
+      item: first,
+      size: 58,
+      radius: 12,
+    );
   }
 }
 
@@ -1025,32 +1473,113 @@ class StaffTransactionScreen extends StatelessWidget {
     }
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F7F8),
       appBar: AppBar(
-        title: const Text('Transaction'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+        title: const Text(
+          'Transaction',
+          style: TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.black),
       ),
       body: selectedItems.isEmpty
-          ? const Center(child: Text('Your basket is empty.'))
+          ? const Center(
+              child: Text(
+                'Your basket is empty.',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
           : Column(
               children: [
                 Expanded(
                   child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
                     itemCount: selectedItems.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final item = selectedItems[index];
                       final qty = cart[item.id] ?? 0;
                       final subtotal = item.price * qty;
 
-                      return ListTile(
-                        title: Text(item.name),
-                        subtitle: Text('Qty: $qty'),
-                        trailing: Text(_peso(subtotal)),
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x12000000),
+                              blurRadius: 10,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            _ProductThumb(
+                              item: item,
+                              size: 56,
+                              radius: 14,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Qty: $qty',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.black54,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              _peso(subtotal),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 10,
+                        offset: Offset(0, -2),
+                      ),
+                    ],
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -1058,15 +1587,16 @@ class StaffTransactionScreen extends StatelessWidget {
                           'Items: $totalItems',
                           style: const TextStyle(
                             fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
                       Text(
                         _peso(totalAmount),
                         style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF309E95),
                         ),
                       ),
                     ],

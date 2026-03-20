@@ -5,12 +5,12 @@ import '../../firebase/store_staff_services.dart';
 
 class AddEditUserScreen extends StatefulWidget {
   final String storeId;
-  final String? memberUid; // null = add, not null = edit
+  final String? staffUid; // null = add, not null = edit
 
   const AddEditUserScreen({
     super.key,
     required this.storeId,
-    this.memberUid,
+    this.staffUid,
   });
 
   @override
@@ -29,7 +29,6 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   bool _saving = false;
   bool _initialized = false;
 
-  // New detailed permissions
   bool _viewInventory = true;
   bool _addStock = true;
   bool _reduceStock = true;
@@ -43,7 +42,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
 
   bool _viewProfile = true;
 
-  bool get isEdit => widget.memberUid != null;
+  bool get isEdit => widget.staffUid != null;
 
   @override
   void dispose() {
@@ -54,20 +53,19 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
     super.dispose();
   }
 
-  Stream<DocumentSnapshot<Map<String, dynamic>>>? _memberStream() {
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _staffStream() {
     if (!isEdit) return null;
     return FirebaseFirestore.instance
         .collection('stores')
         .doc(widget.storeId)
         .collection('staff')
-        .doc(widget.memberUid!)
+        .doc(widget.staffUid!)
         .snapshots();
   }
 
   void _loadPermissions(Map<String, dynamic> data) {
     final perms = (data['permissions'] as Map<String, dynamic>?) ?? {};
 
-    // Supports BOTH old and new keys for backward compatibility
     final oldInventory = perms['inventoryAccess'];
     final oldSales = perms['salesAccess'];
     final oldTransactions = perms['transactionHistoryAccess'];
@@ -150,7 +148,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
       if (isEdit) {
         await _svc.updateMember(
           storeId: widget.storeId,
-          uid: widget.memberUid!,
+          uid: widget.staffUid!,
           name: name,
           phone: phone,
           role: _role,
@@ -211,7 +209,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
     try {
       await _svc.deleteMember(
         storeId: widget.storeId,
-        uid: widget.memberUid!,
+        uid: widget.staffUid!,
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -251,7 +249,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           ),
           child: isEdit
               ? StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                  stream: _memberStream(),
+                  stream: _staffStream(),
                   builder: (context, snap) {
                     final data = snap.data?.data() ?? {};
 
@@ -298,9 +296,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
             enabled: !_saving,
             keyboardType: TextInputType.phone,
           ),
-
           const SizedBox(height: 8),
-
           DropdownButtonFormField<String>(
             key: ValueKey(_role),
             initialValue: _role,
@@ -322,19 +318,13 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
                     });
                   },
           ),
-
           const SizedBox(height: 16),
-
           if (_role == 'staff') ...[
             const Text(
               'Permissions',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-
             const Text(
               'Inventory',
               style: TextStyle(
@@ -364,7 +354,6 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
               value: _pullOutStock,
               onChanged: (v) => setState(() => _pullOutStock = v),
             ),
-
             const SizedBox(height: 10),
             const Text(
               'Sales',
@@ -385,7 +374,6 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
               value: _editCart,
               onChanged: (v) => setState(() => _editCart = v),
             ),
-
             const SizedBox(height: 10),
             const Text(
               'Records',
@@ -406,7 +394,6 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
               value: _viewReceipts,
               onChanged: (v) => setState(() => _viewReceipts = v),
             ),
-
             const SizedBox(height: 10),
             const Text(
               'Account',
@@ -435,9 +422,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
               ),
             ),
           ],
-
           const SizedBox(height: 20),
-
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(

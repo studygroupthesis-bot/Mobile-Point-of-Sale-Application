@@ -4,8 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 
 class StoreSettingsScreen extends StatefulWidget {
   const StoreSettingsScreen({super.key});
@@ -17,6 +17,9 @@ class StoreSettingsScreen extends StatefulWidget {
 class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   final _businessCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _gcashQrCtrl = TextEditingController();
+  final _taxNameCtrl = TextEditingController();
+  final _taxRateCtrl = TextEditingController();
 
   bool _initialized = false;
   bool _saving = false;
@@ -24,15 +27,21 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   bool _acceptCash = true;
   bool _acceptGcash = false;
 
-  String? _logoUrl; // from Firestore
-  Uint8List? _pickedLogoBytes; // preview + upload (Web + Android)
+  bool _taxEnabled = false;
+  bool _taxInclusive = true;
 
-  String? _lastStoreId; // to re-init if store changes
+  String? _logoUrl;
+  Uint8List? _pickedLogoBytes;
+
+  String? _lastStoreId;
 
   @override
   void dispose() {
     _businessCtrl.dispose();
     _addressCtrl.dispose();
+    _gcashQrCtrl.dispose();
+    _taxNameCtrl.dispose();
+    _taxRateCtrl.dispose();
     super.dispose();
   }
 
@@ -122,7 +131,6 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
 
       return await ref.getDownloadURL();
     } catch (e) {
-      // Storage might be disabled / requires billing
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Logo upload skipped: $e')),
@@ -132,11 +140,32 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
     }
   }
 
+  double _safeToDouble(dynamic value, {double fallback = 0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
   Future<void> _save(String storeId) async {
+    final taxRate = double.tryParse(_taxRateCtrl.text.trim());
+
+    if (_taxEnabled) {
+      if (_taxNameCtrl.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a tax name.')),
+        );
+        return;
+      }
+      if (taxRate == null || taxRate < 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a valid tax rate.')),
+        );
+        return;
+      }
+    }
+
     setState(() => _saving = true);
 
     try {
-      // Attempt upload only if user picked a logo
       final uploadedLogoUrl = await _tryUploadLogo(storeId);
 
       final payload = <String, dynamic>{
@@ -144,6 +173,12 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
         'address': _addressCtrl.text.trim(),
         'accept_cash': _acceptCash,
         'accept_gcash': _acceptGcash,
+        'gcashQrUrl': _gcashQrCtrl.text.trim(),
+        'tax_enabled': _taxEnabled,
+        'tax_name':
+            _taxNameCtrl.text.trim().isEmpty ? 'VAT' : _taxNameCtrl.text.trim(),
+        'tax_rate': taxRate ?? 12.0,
+        'tax_inclusive': _taxInclusive,
         'updated_at': FieldValue.serverTimestamp(),
       };
 
@@ -159,7 +194,7 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
       if (uploadedLogoUrl != null) {
         setState(() {
           _logoUrl = uploadedLogoUrl;
-          _pickedLogoBytes = null; // clear preview after successful save
+          _pickedLogoBytes = null;
         });
       }
 
@@ -205,12 +240,41 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
 
                 final userData = userSnap.data!.data() ?? {};
                 final storeId = userData['storeId'] as String?;
+                final role = (userData['role'] as String?) ?? '';
+                final isAdmin = role == 'admin';
 
                 if (storeId == null || storeId.isEmpty) {
                   return const Center(child: Text("No store linked."));
                 }
 
-                // If store changed (rare but safe), re-init
+                if (!isAdmin) {
+                  return Center(
+                    child: Container(
+                      margin: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lock_outline, size: 50),
+                          SizedBox(height: 12),
+                          Text(
+                            'Only admin can edit store and tax settings.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
                 if (_lastStoreId != storeId) {
                   _lastStoreId = storeId;
                   _initialized = false;
@@ -227,7 +291,7 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    if (!(storeSnap.data!.exists)) {
+                    if (!storeSnap.data!.exists) {
                       return const Center(child: Text("Store not found."));
                     }
 
@@ -240,18 +304,31 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                         (storeData['accept_cash'] as bool?) ?? true;
                     final acceptGcash =
                         (storeData['accept_gcash'] as bool?) ?? false;
+                    final gcashQrUrl =
+                        (storeData['gcashQrUrl'] as String?) ?? '';
                     final logoUrl = (storeData['logo_url'] as String?) ?? '';
 
-                    // IMPORTANT: initialize ONLY after we have store data
+                    final taxEnabled =
+                        (storeData['tax_enabled'] as bool?) ?? false;
+                    final taxName = (storeData['tax_name'] as String?) ?? 'VAT';
+                    final taxRate =
+                        _safeToDouble(storeData['tax_rate'], fallback: 12.0);
+                    final taxInclusive =
+                        (storeData['tax_inclusive'] as bool?) ?? true;
+
                     if (!_initialized) {
                       _businessCtrl.text = businessName;
                       _addressCtrl.text = address;
+                      _gcashQrCtrl.text = gcashQrUrl;
                       _acceptCash = acceptCash;
                       _acceptGcash = acceptGcash;
+                      _taxEnabled = taxEnabled;
+                      _taxNameCtrl.text = taxName;
+                      _taxRateCtrl.text = taxRate.toString();
+                      _taxInclusive = taxInclusive;
                       _logoUrl = logoUrl.isEmpty ? null : logoUrl;
                       _initialized = true;
                     } else {
-                      // keep logo reactive
                       _logoUrl = logoUrl.isEmpty ? null : logoUrl;
                     }
 
@@ -265,45 +342,131 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                         ),
                         child: Column(
                           children: [
-                            GestureDetector(
-                              onTap: _saving ? null : _pickLogo,
-                              child: CircleAvatar(
-                                radius: 40,
-                                backgroundColor: Colors.grey.shade200,
-                                backgroundImage: _pickedLogoBytes != null
-                                    ? MemoryImage(_pickedLogoBytes!)
-                                    : (_logoUrl != null && _logoUrl!.isNotEmpty)
-                                        ? NetworkImage(_logoUrl!)
-                                        : null,
-                                child: (_pickedLogoBytes == null &&
-                                        (_logoUrl == null || _logoUrl!.isEmpty))
-                                    ? const Icon(Icons.store,
-                                        size: 34, color: Colors.black54)
-                                    : null,
+                            Expanded(
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: _saving ? null : _pickLogo,
+                                      child: CircleAvatar(
+                                        radius: 40,
+                                        backgroundColor: Colors.grey.shade200,
+                                        backgroundImage:
+                                            _pickedLogoBytes != null
+                                                ? MemoryImage(_pickedLogoBytes!)
+                                                : (_logoUrl != null &&
+                                                        _logoUrl!.isNotEmpty)
+                                                    ? NetworkImage(_logoUrl!)
+                                                    : null,
+                                        child: (_pickedLogoBytes == null &&
+                                                (_logoUrl == null ||
+                                                    _logoUrl!.isEmpty))
+                                            ? const Icon(
+                                                Icons.store,
+                                                size: 34,
+                                                color: Colors.black54,
+                                              )
+                                            : null,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      "Tap logo to change",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black54,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    _field('Business Name', _businessCtrl),
+                                    _field('Business Address', _addressCtrl),
+                                    const SizedBox(height: 10),
+                                    const Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        'Payment Settings',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SwitchListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text('Cash Payment'),
+                                      value: _acceptCash,
+                                      onChanged: _saving
+                                          ? null
+                                          : (v) =>
+                                              setState(() => _acceptCash = v),
+                                    ),
+                                    SwitchListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text('GCash Payment'),
+                                      value: _acceptGcash,
+                                      onChanged: _saving
+                                          ? null
+                                          : (v) =>
+                                              setState(() => _acceptGcash = v),
+                                    ),
+                                    if (_acceptGcash)
+                                      _field('GCash QR URL', _gcashQrCtrl),
+                                    const SizedBox(height: 10),
+                                    const Divider(),
+                                    const SizedBox(height: 10),
+                                    const Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        'Tax Settings',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SwitchListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text('Enable Tax'),
+                                      subtitle: const Text(
+                                        'Show tax in transaction and receipt',
+                                      ),
+                                      value: _taxEnabled,
+                                      onChanged: _saving
+                                          ? null
+                                          : (v) =>
+                                              setState(() => _taxEnabled = v),
+                                    ),
+                                    if (_taxEnabled) ...[
+                                      _field('Tax Name', _taxNameCtrl),
+                                      _field(
+                                        'Tax Rate (%)',
+                                        _taxRateCtrl,
+                                        keyboardType: const TextInputType
+                                            .numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                      ),
+                                      SwitchListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        title: const Text('Inclusive Tax'),
+                                        subtitle: const Text(
+                                          'Customer total stays the same. Tax is extracted from the subtotal.',
+                                        ),
+                                        value: _taxInclusive,
+                                        onChanged: _saving
+                                            ? null
+                                            : (v) => setState(
+                                                  () => _taxInclusive = v,
+                                                ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            const Text("Tap logo to change",
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.black54)),
-                            const SizedBox(height: 16),
-                            _field('Business Name', _businessCtrl),
-                            _field('Business Address', _addressCtrl),
-                            SwitchListTile(
-                              title: const Text('Cash Payment'),
-                              value: _acceptCash,
-                              onChanged: _saving
-                                  ? null
-                                  : (v) => setState(() => _acceptCash = v),
-                            ),
-                            SwitchListTile(
-                              title: const Text('GCash Payment'),
-                              value: _acceptGcash,
-                              onChanged: _saving
-                                  ? null
-                                  : (v) => setState(() => _acceptGcash = v),
-                            ),
-                            const Spacer(),
+                            const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
@@ -318,7 +481,8 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                                 onPressed:
                                     _saving ? null : () => _save(storeId),
                                 child: Text(
-                                    _saving ? 'SAVING...' : 'SAVE CHANGES'),
+                                  _saving ? 'SAVING...' : 'SAVE CHANGES',
+                                ),
                               ),
                             ),
                           ],
@@ -332,15 +496,22 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
     );
   }
 
-  Widget _field(String label, TextEditingController ctrl) {
+  Widget _field(
+    String label,
+    TextEditingController ctrl, {
+    TextInputType? keyboardType,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextFormField(
         controller: ctrl,
+        keyboardType: keyboardType,
         decoration: InputDecoration(
           labelText: label,
           suffixIcon: const Icon(Icons.edit),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );

@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-// ✅ CHANGE THIS IMPORT PATH IF NEEDED
 import '../transaction/transaction_screen.dart';
+import '../transaction/receipt_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -19,7 +19,7 @@ class _SalesScreenState extends State<SalesScreen> {
   bool _searching = false;
   final TextEditingController _searchCtrl = TextEditingController();
 
-  int _navIndex = 1; // 0 home, 1 sales, 2 inventory, 3 profile
+  int _navIndex = 1;
 
   final money = NumberFormat.currency(locale: 'en_PH', symbol: '₱');
   final timeFmt = DateFormat('h:mm a');
@@ -30,7 +30,6 @@ class _SalesScreenState extends State<SalesScreen> {
     super.dispose();
   }
 
-  // Same pattern as your TransactionScreen: users/{uid}.storeId
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception("Not logged in.");
@@ -43,6 +42,30 @@ class _SalesScreenState extends State<SalesScreen> {
     return storeId;
   }
 
+  double _safeToDouble(dynamic value, {double fallback = 0.0}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  int _safeToInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '0') ?? 0;
+  }
+
+  DateTime _parseTxDate(Map<String, dynamic> data) {
+    final ts = data['createdAt'];
+    if (ts is Timestamp) return ts.toDate();
+
+    final local = data['createdAtLocal'];
+    if (local is String) {
+      final parsed = DateTime.tryParse(local);
+      if (parsed != null) return parsed;
+    }
+
+    return DateTime.now();
+  }
+
   DateTime get _startOfToday {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
@@ -50,37 +73,49 @@ class _SalesScreenState extends State<SalesScreen> {
 
   DateTime get _startOfTomorrow => _startOfToday.add(const Duration(days: 1));
 
-  // Stream for Today's Sales (sum totals from today's transactions)
   Stream<double> _todaysSalesStream(String storeId) {
     return _db
         .collection('stores')
         .doc(storeId)
         .collection('transactions')
-        .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_startOfToday))
-        .where('createdAt', isLessThan: Timestamp.fromDate(_startOfTomorrow))
+        .where(
+          'createdAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(_startOfToday),
+        )
+        .where(
+          'createdAt',
+          isLessThan: Timestamp.fromDate(_startOfTomorrow),
+        )
         .snapshots()
         .map((snap) {
       double sum = 0;
       for (final d in snap.docs) {
-        final raw = d.data()['total'] ?? 0;
-        final v = raw is int ? raw.toDouble() : (raw as num).toDouble();
-        sum += v;
+        final data = d.data();
+        sum += _safeToDouble(
+          data['grandTotal'],
+          fallback: _safeToDouble(data['total']),
+        );
       }
       return sum;
     });
   }
 
-  // Stream for list (either latest or invoice prefix search)
-  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _txListStream(String storeId) {
-    final col = _db.collection('stores').doc(storeId).collection('transactions');
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _txListStream(
+    String storeId,
+  ) {
+    final col =
+        _db.collection('stores').doc(storeId).collection('transactions');
 
     final q = _searchCtrl.text.trim().toLowerCase();
 
     if (!_searching || q.isEmpty) {
-      return col.orderBy('createdAt', descending: true).limit(50).snapshots().map((s) => s.docs);
+      return col
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .snapshots()
+          .map((s) => s.docs);
     }
 
-    // ✅ Prefix search using invoiceNoLower (requires the field exists)
     return col
         .orderBy('invoiceNoLower')
         .startAt([q])
@@ -89,7 +124,7 @@ class _SalesScreenState extends State<SalesScreen> {
         .snapshots()
         .map((s) {
           final docs = s.docs.toList();
-          // Optional: sort by latest so UI still looks like "history"
+
           docs.sort((a, b) {
             final ta = a.data()['createdAt'];
             final tb = b.data()['createdAt'];
@@ -97,6 +132,7 @@ class _SalesScreenState extends State<SalesScreen> {
             final db = tb is Timestamp ? tb.toDate() : DateTime(1970);
             return db.compareTo(da);
           });
+
           return docs;
         });
   }
@@ -111,7 +147,78 @@ class _SalesScreenState extends State<SalesScreen> {
   void _openTransactionScreen() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const TransactionScreen()),
+      MaterialPageRoute(
+        builder: (_) => const TransactionScreen(isActive: true),
+      ),
+    );
+  }
+
+  Future<void> _openReceipt(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    final data = doc.data();
+
+    final rawItems = (data['items'] as List?) ?? [];
+    final items = rawItems.map((e) {
+      final map = Map<String, dynamic>.from(e as Map);
+      return ReceiptLine(
+        name: (map['name'] ?? '').toString(),
+        price: _safeToDouble(map['price']),
+        qty: _safeToInt(map['qty']),
+      );
+    }).toList();
+
+    final subtotal = _safeToDouble(data['subtotal']);
+    final tax = _safeToDouble(
+      data['tax'],
+      fallback: _safeToDouble(data['taxAmount']),
+    );
+
+    final taxEnabled =
+        (data['taxEnabled'] as bool?) ?? ((tax > 0) ? true : false);
+
+    final taxableSales = _safeToDouble(
+      data['taxableSales'],
+      fallback: taxEnabled ? (subtotal - tax) : subtotal,
+    );
+
+    final receipt = ReceiptData(
+      invoiceId: (data['invoiceId'] ?? doc.id).toString(),
+      invoiceNo: (data['invoiceNo'] ?? data['invoiceId'] ?? doc.id).toString(),
+      storeName: (data['storeName'] ?? 'Business Sale').toString(),
+      dateTime: _parseTxDate(data),
+      paymentMode:
+          (data['paymentMode'] ?? data['paymentMethod'] ?? 'Cash').toString(),
+      cashierUid: (data['cashierUid'] ?? '').toString(),
+      subtotal: subtotal,
+      taxableSales: taxableSales,
+      taxEnabled: taxEnabled,
+      taxName: (data['taxName'] ?? 'VAT').toString(),
+      taxRate: _safeToDouble(data['taxRate'], fallback: 12.0),
+      taxInclusive: (data['taxInclusive'] as bool?) ?? true,
+      tax: tax,
+      grandTotal: _safeToDouble(
+        data['grandTotal'],
+        fallback: _safeToDouble(data['total']),
+      ),
+      amountReceived: _safeToDouble(data['amountReceived']),
+      change: _safeToDouble(data['change']),
+      items: items,
+    );
+
+    final receiptUrl = (data['publicReceiptUrl'] as String?)?.trim();
+
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReceiptScreen(
+          data: receipt,
+          receiptUrl:
+              (receiptUrl != null && receiptUrl.isNotEmpty) ? receiptUrl : null,
+        ),
+      ),
     );
   }
 
@@ -125,8 +232,11 @@ class _SalesScreenState extends State<SalesScreen> {
             body: Center(child: Text('Error: ${storeSnap.error}')),
           );
         }
+
         if (!storeSnap.hasData) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         final storeId = storeSnap.data!;
@@ -136,7 +246,6 @@ class _SalesScreenState extends State<SalesScreen> {
           body: SafeArea(
             child: Stack(
               children: [
-                // background gradient similar to your target
                 Positioned.fill(
                   child: Container(
                     decoration: const BoxDecoration(
@@ -148,7 +257,6 @@ class _SalesScreenState extends State<SalesScreen> {
                     ),
                   ),
                 ),
-
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
                   child: Column(
@@ -158,7 +266,6 @@ class _SalesScreenState extends State<SalesScreen> {
                       const SizedBox(height: 14),
                       _todayCard(storeId),
                       const SizedBox(height: 18),
-
                       const Text(
                         "Transaction History",
                         style: TextStyle(
@@ -168,27 +275,35 @@ class _SalesScreenState extends State<SalesScreen> {
                         ),
                       ),
                       const SizedBox(height: 10),
-
                       Expanded(
-                        child: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                        child: StreamBuilder<
+                            List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
                           stream: _txListStream(storeId),
                           builder: (context, snap) {
                             if (snap.hasError) {
-                              return Center(child: Text('Error: ${snap.error}'));
+                              return Center(
+                                child: Text('Error: ${snap.error}'),
+                              );
                             }
+
                             if (!snap.hasData) {
-                              return const Center(child: CircularProgressIndicator());
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
                             }
 
                             final docs = snap.data!;
                             if (docs.isEmpty) {
-                              return const Center(child: Text('No transactions yet.'));
+                              return const Center(
+                                child: Text('No transactions yet.'),
+                              );
                             }
 
                             return ListView.separated(
                               padding: const EdgeInsets.only(bottom: 110),
                               itemCount: docs.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
                               itemBuilder: (context, i) => _txTile(docs[i]),
                             );
                           },
@@ -197,7 +312,6 @@ class _SalesScreenState extends State<SalesScreen> {
                     ],
                   ),
                 ),
-
                 _bottomNavOverlay(),
               ],
             ),
@@ -207,14 +321,13 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
-  // ---------- UI Widgets ----------
-
   Widget _topBar(String storeId) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _db.collection('stores').doc(storeId).snapshots(),
       builder: (context, snap) {
         final data = snap.data?.data() ?? {};
-        final storeName = (data['name'] ?? 'Store').toString();
+        final storeName =
+            (data['business_name'] ?? data['name'] ?? 'Store').toString();
 
         return Row(
           children: [
@@ -225,7 +338,11 @@ class _SalesScreenState extends State<SalesScreen> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(999),
                 boxShadow: const [
-                  BoxShadow(blurRadius: 16, offset: Offset(0, 8), color: Color(0x14000000)),
+                  BoxShadow(
+                    blurRadius: 16,
+                    offset: Offset(0, 8),
+                    color: Color(0x14000000),
+                  ),
                 ],
               ),
               child: const Center(
@@ -233,7 +350,6 @@ class _SalesScreenState extends State<SalesScreen> {
               ),
             ),
             const SizedBox(width: 10),
-
             Expanded(
               child: Text(
                 storeName,
@@ -244,15 +360,12 @@ class _SalesScreenState extends State<SalesScreen> {
                 ),
               ),
             ),
-
             IconButton(
               onPressed: _toggleSearch,
               icon: Icon(_searching ? Icons.close : Icons.search),
             ),
             IconButton(
-              onPressed: () {
-                // TODO: menu/settings
-              },
+              onPressed: () {},
               icon: const Icon(Icons.menu),
             ),
           ],
@@ -268,7 +381,11 @@ class _SalesScreenState extends State<SalesScreen> {
         color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(14),
         boxShadow: const [
-          BoxShadow(blurRadius: 18, offset: Offset(0, 10), color: Color(0x12000000)),
+          BoxShadow(
+            blurRadius: 18,
+            offset: Offset(0, 10),
+            color: Color(0x12000000),
+          ),
         ],
       ),
       child: Row(
@@ -277,7 +394,7 @@ class _SalesScreenState extends State<SalesScreen> {
             child: _searching
                 ? TextField(
                     controller: _searchCtrl,
-                    onChanged: (_) => setState(() {}), // rebuild to swap stream
+                    onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
                       hintText: "Search invoice…",
                       border: InputBorder.none,
@@ -293,21 +410,26 @@ class _SalesScreenState extends State<SalesScreen> {
                         children: [
                           const Text(
                             "Today’s Sales",
-                            style: TextStyle(fontWeight: FontWeight.w700, color: Colors.black54),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black54,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             money.format(value),
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
                         ],
                       );
                     },
                   ),
           ),
-
           InkWell(
-            onTap: _openTransactionScreen, // "+" starts a new transaction
+            onTap: _openTransactionScreen,
             borderRadius: BorderRadius.circular(999),
             child: Container(
               width: 40,
@@ -328,14 +450,16 @@ class _SalesScreenState extends State<SalesScreen> {
     final d = doc.data();
 
     final invoiceNo = (d['invoiceNo'] ?? d['invoiceId'] ?? doc.id).toString();
-    final method = (d['paymentMethod'] ?? d['paymentMode'] ?? 'Cash').toString();
+    final method =
+        (d['paymentMethod'] ?? d['paymentMode'] ?? 'Cash').toString();
     final status = (d['status'] ?? 'Success').toString();
 
-    final rawTotal = d['total'] ?? d['grandTotal'] ?? 0;
-    final total = rawTotal is int ? rawTotal.toDouble() : (rawTotal as num).toDouble();
+    final total = _safeToDouble(
+      d['grandTotal'],
+      fallback: _safeToDouble(d['total']),
+    );
 
-    final ts = d['createdAt'];
-    final dt = ts is Timestamp ? ts.toDate() : DateTime.now();
+    final dt = _parseTxDate(d);
 
     return Container(
       decoration: BoxDecoration(
@@ -343,7 +467,10 @@ class _SalesScreenState extends State<SalesScreen> {
         borderRadius: BorderRadius.circular(14),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 6,
+        ),
         leading: const CircleAvatar(
           backgroundColor: Color(0xFFD6EFEC),
           child: Icon(Icons.receipt, color: Color(0xFF2E7D78)),
@@ -354,16 +481,28 @@ class _SalesScreenState extends State<SalesScreen> {
         ),
         subtitle: Row(
           children: [
-            Text(method, style: const TextStyle(color: Colors.black54)),
+            Expanded(
+              child: Text(
+                method,
+                style: const TextStyle(color: Colors.black54),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             const SizedBox(width: 10),
-            Text(timeFmt.format(dt), style: const TextStyle(color: Colors.black38)),
+            Text(
+              timeFmt.format(dt),
+              style: const TextStyle(color: Colors.black38),
+            ),
           ],
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(money.format(total), style: const TextStyle(fontWeight: FontWeight.w900)),
+            Text(
+              money.format(total),
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 2),
             Text(
               status,
@@ -375,10 +514,7 @@ class _SalesScreenState extends State<SalesScreen> {
             ),
           ],
         ),
-        onTap: () {
-          // TODO: open receipt detail (optional)
-          // You can pass doc.id to a receipt detail screen that reads the doc
-        },
+        onTap: () => _openReceipt(doc),
       ),
     );
   }
@@ -391,7 +527,6 @@ class _SalesScreenState extends State<SalesScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // center action button (receipt)
           Container(
             width: 62,
             height: 62,
@@ -399,7 +534,11 @@ class _SalesScreenState extends State<SalesScreen> {
               color: const Color(0xFF0A3B46),
               borderRadius: BorderRadius.circular(999),
               boxShadow: const [
-                BoxShadow(blurRadius: 20, offset: Offset(0, 12), color: Color(0x1A000000)),
+                BoxShadow(
+                  blurRadius: 20,
+                  offset: Offset(0, 12),
+                  color: Color(0x1A000000),
+                ),
               ],
             ),
             child: IconButton(
@@ -408,8 +547,6 @@ class _SalesScreenState extends State<SalesScreen> {
             ),
           ),
           const SizedBox(height: 10),
-
-          // pill nav
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 22),
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -418,7 +555,11 @@ class _SalesScreenState extends State<SalesScreen> {
               color: const Color(0xFF0A3B46),
               borderRadius: BorderRadius.circular(40),
               boxShadow: const [
-                BoxShadow(blurRadius: 22, offset: Offset(0, 12), color: Color(0x1A000000)),
+                BoxShadow(
+                  blurRadius: 22,
+                  offset: Offset(0, 12),
+                  color: Color(0x1A000000),
+                ),
               ],
             ),
             child: Row(
@@ -450,7 +591,10 @@ class _SalesScreenState extends State<SalesScreen> {
           color: active ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
         ),
-        child: Icon(icon, color: active ? const Color(0xFF0A3B46) : Colors.white),
+        child: Icon(
+          icon,
+          color: active ? const Color(0xFF0A3B46) : Colors.white,
+        ),
       ),
     );
   }

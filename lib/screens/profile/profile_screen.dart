@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'account_settings_screen.dart';
-import 'manage_users_screen.dart'; // ✅ this should be your LIST screen
+import 'manage_users_screen.dart';
 import 'store_settings_screen.dart';
 import 'data_sync_screen.dart';
 import '../auth/login_screen.dart';
@@ -33,8 +33,7 @@ class ProfileScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              /// BACK BUTTON + TITLE
-              const Row(
+              Row(
                 children: [
                   SizedBox(width: 5),
                   Text(
@@ -44,8 +43,6 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
-
-              /// MAIN CARD
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -62,11 +59,8 @@ class ProfileScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /// BUSINESS HEADER
                     _StoreHeader(uid: uid),
                     const SizedBox(height: 25),
-
-                    /// ACCOUNT SETTINGS
                     _menuItem(
                       icon: Icons.settings,
                       title: "Account Settings",
@@ -79,8 +73,6 @@ class ProfileScreen extends StatelessWidget {
                         );
                       },
                     ),
-
-                    /// MANAGE USERS (Admin only)
                     if (uid != null)
                       StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                         stream: FirebaseFirestore.instance
@@ -90,39 +82,55 @@ class ProfileScreen extends StatelessWidget {
                         builder: (context, snap) {
                           final data = snap.data?.data();
                           final role = (data?['role'] as String?) ?? '';
+                          final isAdmin = role == 'admin';
 
-                          if (role != 'admin') return const SizedBox.shrink();
-
-                          return _menuItem(
-                            icon: Icons.group,
-                            title: "Manage Users",
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ManageUsersScreen(),
+                          return Column(
+                            children: [
+                              if (isAdmin)
+                                _menuItem(
+                                  icon: Icons.group,
+                                  title: "Manage Users",
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ManageUsersScreen(),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
+                              _menuItem(
+                                icon: Icons.store_mall_directory,
+                                title: "Store Settings",
+                                subtitle: isAdmin
+                                    ? "Business, payments, and tax settings"
+                                    : "Admin only",
+                                enabled: isAdmin,
+                                onTap: isAdmin
+                                    ? () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const StoreSettingsScreen(),
+                                          ),
+                                        );
+                                      }
+                                    : null,
+                              ),
+                            ],
                           );
                         },
+                      )
+                    else
+                      _menuItem(
+                        icon: Icons.store_mall_directory,
+                        title: "Store Settings",
+                        subtitle: "Admin only",
+                        enabled: false,
+                        onTap: null,
                       ),
-
-                    /// STORE SETTINGS
-                    _menuItem(
-                      icon: Icons.store_mall_directory,
-                      title: "Store Settings",
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const StoreSettingsScreen(),
-                          ),
-                        );
-                      },
-                    ),
-
-                    /// DATA SYNC
                     _menuItem(
                       icon: Icons.cloud_sync,
                       title: "Data Sync",
@@ -135,10 +143,7 @@ class ProfileScreen extends StatelessWidget {
                         );
                       },
                     ),
-
                     const SizedBox(height: 20),
-
-                    /// SIGN OUT BUTTON
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -170,18 +175,43 @@ class ProfileScreen extends StatelessWidget {
   Widget _menuItem({
     required IconData icon,
     required String title,
-    required VoidCallback onTap,
+    String? subtitle,
+    required VoidCallback? onTap,
+    bool enabled = true,
   }) {
+    final color = enabled ? Colors.black : Colors.black38;
+
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 24),
+            Icon(icon, size: 24, color: color),
             const SizedBox(width: 12),
-            Expanded(child: Text(title, style: const TextStyle(fontSize: 16))),
-            const Icon(Icons.chevron_right, size: 24),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(fontSize: 16, color: color),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: enabled ? Colors.black54 : Colors.black38,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 24, color: color),
           ],
         ),
       ),
@@ -208,7 +238,6 @@ class _StoreHeader extends StatelessWidget {
         final storeId = userData?["storeId"] as String?;
 
         if (storeId == null || storeId.isEmpty) {
-          // fallback (if you kept business_name inside users before)
           final fallback =
               (userData?["business_name"] as String?) ?? "My Business";
           return _headerRow(name: fallback, logoUrl: null);
