@@ -6,12 +6,12 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../services/cloudinary_service.dart';
-import '../../screens/inventory/barcode_scanner_screen.dart';
+import 'package:pos_system/screens/inventory/barcode_scanner_screen.dart';
+import 'package:pos_system/services/cloudinary_service.dart';
 
-enum SoldBy { each, weight }
+enum _SoldBy { each, weight }
 
-enum RepresentationType { color, image }
+enum _RepresentationType { color, image }
 
 class CreateItemScreen extends StatefulWidget {
   const CreateItemScreen({super.key});
@@ -23,22 +23,22 @@ class CreateItemScreen extends StatefulWidget {
 class _CreateItemScreenState extends State<CreateItemScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _nameController = TextEditingController();
-  final _categoryController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _costController = TextEditingController();
-  final _barcodeController = TextEditingController();
-  final _stockQtyController = TextEditingController();
+  final TextEditingController name = TextEditingController();
+  final TextEditingController category = TextEditingController();
+  final TextEditingController price = TextEditingController();
+  final TextEditingController cost = TextEditingController();
+  final TextEditingController barcode = TextEditingController();
+  final TextEditingController stockQty = TextEditingController(text: '0');
 
-  SoldBy _soldBy = SoldBy.each;
+  _SoldBy soldBy = _SoldBy.each;
 
-  RepresentationType _representationType = RepresentationType.color;
-  Color _selectedColor = const Color(0xFFD9D9D9);
+  _RepresentationType representation = _RepresentationType.color;
+  Color selectedColor = const Color(0xFFD9D9D9);
 
   XFile? _pickedImage;
   Uint8List? _imageBytes;
 
-  bool _isSaving = false;
+  bool saving = false;
   bool _loadingCategories = true;
   String? _storeId;
   List<String> _savedCategories = [];
@@ -47,7 +47,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   static const Color _fieldFill = Color(0xFFE6E6E6);
   static const Color _fieldBorder = Color(0xFFD0D0D0);
 
-  final List<Color> _availableColors = const [
+  final colors = const [
     Colors.grey,
     Colors.red,
     Colors.orange,
@@ -68,12 +68,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _categoryController.dispose();
-    _priceController.dispose();
-    _costController.dispose();
-    _barcodeController.dispose();
-    _stockQtyController.dispose();
+    name.dispose();
+    category.dispose();
+    price.dispose();
+    cost.dispose();
+    barcode.dispose();
+    stockQty.dispose();
     super.dispose();
   }
 
@@ -129,7 +129,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     if (trimmed.isEmpty) return;
 
     setState(() {
-      _categoryController.text = trimmed;
+      category.text = trimmed;
 
       if (!_hasCategory(trimmed)) {
         _savedCategories.add(trimmed);
@@ -142,9 +142,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      throw Exception("Not logged in. Please login again.");
-    }
+    if (user == null) throw Exception('Not logged in. Please login again.');
 
     final snap = await FirebaseFirestore.instance
         .collection('users')
@@ -153,9 +151,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
-      throw Exception(
-        "Missing storeId in users/${user.uid}. Add storeId to the user profile.",
-      );
+      throw Exception('Missing storeId in users/${user.uid}.');
     }
     return storeId;
   }
@@ -170,7 +166,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
       setState(() {
         _pickedImage = picked;
         _imageBytes = bytes;
-        _representationType = RepresentationType.image;
+        representation = _RepresentationType.image;
       });
     } catch (e) {
       if (!mounted) return;
@@ -182,33 +178,32 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   void _selectColor(Color color) {
     setState(() {
-      _selectedColor = color;
-      _representationType = RepresentationType.color;
+      selectedColor = color;
+      representation = _RepresentationType.color;
       _pickedImage = null;
       _imageBytes = null;
     });
   }
 
   Future<Map<String, String>?> _uploadImageIfNeeded() async {
-    if (_representationType != RepresentationType.image ||
-        _pickedImage == null ||
-        _imageBytes == null) {
-      return null;
+    if (representation != _RepresentationType.image) {
+      return {'imageUrl': '', 'imagePublicId': ''};
     }
+
+    if (_pickedImage == null || _imageBytes == null) return null;
 
     final res = await CloudinaryService.uploadBytes(
       bytes: _imageBytes!,
       filename: _pickedImage!.name,
     );
 
-    final imageUrl = res["secure_url"] as String?;
-    final publicId = res["public_id"] as String?;
-
+    final imageUrl = res['secure_url'] as String?;
+    final publicId = res['public_id'] as String?;
     if (imageUrl == null || publicId == null) {
-      throw Exception("Cloudinary response missing secure_url or public_id.");
+      throw Exception('Cloudinary response missing secure_url/public_id.');
     }
 
-    return {"imageUrl": imageUrl, "imagePublicId": publicId};
+    return {'imageUrl': imageUrl, 'imagePublicId': publicId};
   }
 
   String? _validateRequired(String? value, String field) {
@@ -227,17 +222,22 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   String? _validateWholeNumber(String? value, String field) {
     if (value == null || value.trim().isEmpty) return '$field is required';
     final n = int.tryParse(value.trim());
-    if (n == null) return 'Enter a whole number';
+    if (n == null) return 'Enter a valid whole number';
     if (n < 0) return '$field cannot be negative';
     return null;
   }
 
-  String _normalizeBarcode(String value) {
-    return value.trim();
+  String _normalizeBarcodeValue(dynamic value) {
+    if (value == null) return '';
+    var text = value.toString().trim().replaceAll(RegExp(r'\s+'), '');
+    if (text.endsWith('.0')) {
+      text = text.substring(0, text.length - 2);
+    }
+    return text;
   }
 
   Future<void> _scanBarcodeIntoField() async {
-    if (_isSaving) return;
+    if (saving) return;
 
     final code = await Navigator.of(context).push<String>(
       MaterialPageRoute(
@@ -247,11 +247,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
     if (!mounted || code == null) return;
 
-    final normalized = _normalizeBarcode(code);
+    final normalized = _normalizeBarcodeValue(code);
     if (normalized.isEmpty) return;
 
     setState(() {
-      _barcodeController.text = normalized;
+      barcode.text = normalized;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -263,38 +263,51 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     required String storeId,
     required String barcodeValue,
   }) async {
-    if (barcodeValue.isEmpty) return false;
+    final normalized = _normalizeBarcodeValue(barcodeValue);
+    if (normalized.isEmpty) return false;
 
-    final snap = await FirebaseFirestore.instance
+    final itemsRef = FirebaseFirestore.instance
         .collection('stores')
         .doc(storeId)
-        .collection('items')
-        .where('barcode', isEqualTo: barcodeValue)
-        .limit(10)
+        .collection('items');
+
+    final exact =
+        await itemsRef.where('barcode', isEqualTo: normalized).limit(1).get();
+
+    if (exact.docs.isNotEmpty) return true;
+
+    final exactNormalized = await itemsRef
+        .where('barcodeNormalized', isEqualTo: normalized)
+        .limit(1)
         .get();
 
-    return snap.docs.isNotEmpty;
+    if (exactNormalized.docs.isNotEmpty) return true;
+
+    final all = await itemsRef.get();
+    for (final doc in all.docs) {
+      final saved = _normalizeBarcodeValue(doc.data()['barcode']);
+      if (saved == normalized) return true;
+    }
+
+    return false;
   }
 
-  Future<void> _saveItem() async {
+  Future<void> createItem() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_categoryController.text.trim().isEmpty) {
+    if (category.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Category is required')),
       );
       return;
     }
 
-    setState(() => _isSaving = true);
+    setState(() => saving = true);
 
     try {
       final storeId = _storeId ?? await _requireStoreId();
-
-      final price = double.tryParse(_priceController.text.trim()) ?? 0;
-      final cost = double.tryParse(_costController.text.trim()) ?? 0;
-      final stockQty = int.tryParse(_stockQtyController.text.trim()) ?? 0;
-      final barcodeValue = _normalizeBarcode(_barcodeController.text);
+      final barcodeValue = _normalizeBarcodeValue(barcode.text);
+      final initialStock = int.tryParse(stockQty.text.trim()) ?? 0;
 
       if (barcodeValue.isNotEmpty) {
         final exists = await _barcodeExistsInStore(
@@ -313,53 +326,60 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
         }
       }
 
-      final upload = await _uploadImageIfNeeded();
-      final imageUrl = upload?["imageUrl"];
-      final imagePublicId = upload?["imagePublicId"];
+      final uploaded = await _uploadImageIfNeeded();
 
-      final itemData = {
-        'name': _nameController.text.trim(),
-        'nameLower': _nameController.text.trim().toLowerCase(),
-        'category': _categoryController.text.trim(),
-        'soldBy': _soldBy == SoldBy.each ? 'each' : 'weight',
-        'price': price,
-        'cost': cost,
+      final user = FirebaseAuth.instance.currentUser;
+      final payload = <String, dynamic>{
+        'name': name.text.trim(),
+        'nameLower': name.text.trim().toLowerCase(),
+        'category': category.text.trim(),
+        'price': double.tryParse(price.text.trim()) ?? 0,
+        'cost': double.tryParse(cost.text.trim()) ?? 0,
         'barcode': barcodeValue,
+        'barcodeNormalized': barcodeValue,
+        'soldBy': soldBy == _SoldBy.each ? 'each' : 'weight',
         'trackStock': true,
-        'stockQty': stockQty,
+        'stockQty': initialStock,
+        'stock': initialStock,
+        'quantity': initialStock,
         'representationType':
-            _representationType == RepresentationType.color ? 'color' : 'image',
-        'colorValue': _representationType == RepresentationType.color
-            ? _selectedColor.toARGB32()
+            representation == _RepresentationType.color ? 'color' : 'image',
+        'colorValue': representation == _RepresentationType.color
+            ? selectedColor.toARGB32()
             : null,
-        'imageUrl':
-            _representationType == RepresentationType.image ? imageUrl : null,
-        'imagePublicId': _representationType == RepresentationType.image
-            ? imagePublicId
-            : null,
+        'imageUrl': null,
+        'imagePublicId': null,
         'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+        'createdByUid': user?.uid,
+        'storeId': storeId,
       };
+
+      if (uploaded != null && uploaded['imageUrl']!.isNotEmpty) {
+        payload['imageUrl'] = uploaded['imageUrl'];
+        payload['imagePublicId'] = uploaded['imagePublicId'];
+      }
 
       await FirebaseFirestore.instance
           .collection('stores')
           .doc(storeId)
           .collection('items')
-          .add(itemData);
+          .add(payload);
 
-      _setCategory(_categoryController.text);
+      _setCategory(category.text);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Item added successfully')),
+        const SnackBar(content: Text('Item created successfully')),
       );
-      Navigator.pop(context);
+      Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving item: $e')),
+        SnackBar(content: Text('Error creating item: $e')),
       );
     } finally {
-      if (mounted) setState(() => _isSaving = false);
+      if (mounted) setState(() => saving = false);
     }
   }
 
@@ -402,7 +422,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                         contentPadding: EdgeInsets.zero,
                         title: Text(cat),
                         trailing:
-                            _categoryController.text.trim().toLowerCase() ==
+                            category.text.trim().toLowerCase() ==
                                     cat.toLowerCase()
                                 ? const Icon(Icons.check, color: _teal)
                                 : null,
@@ -487,10 +507,10 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
-                    children: _availableColors.map((color) {
+                    children: colors.map((color) {
                       final isSelected =
-                          _representationType == RepresentationType.color &&
-                              _selectedColor.toARGB32() == color.toARGB32();
+                          representation == _RepresentationType.color &&
+                              selectedColor.toARGB32() == color.toARGB32();
 
                       return GestureDetector(
                         onTap: () {
@@ -601,6 +621,11 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Widget _buildPreviewCircle() {
+    ImageProvider? imageProvider;
+    if (representation == _RepresentationType.image && _imageBytes != null) {
+      imageProvider = MemoryImage(_imageBytes!);
+    }
+
     return GestureDetector(
       onTap: _showRepresentationPicker,
       child: Stack(
@@ -611,39 +636,47 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
             height: 92,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _representationType == RepresentationType.color
-                  ? _selectedColor
+              color: representation == _RepresentationType.color
+                  ? selectedColor
                   : Colors.grey.shade300,
-              image: _representationType == RepresentationType.image &&
-                      _imageBytes != null
-                  ? DecorationImage(
-                      image: MemoryImage(_imageBytes!),
-                      fit: BoxFit.cover,
-                    )
+              image: imageProvider != null
+                  ? DecorationImage(image: imageProvider, fit: BoxFit.cover)
                   : null,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: _representationType == RepresentationType.image &&
-                    _imageBytes == null
-                ? const Icon(Icons.image_outlined, color: Colors.grey, size: 30)
-                : null,
+            child:
+                imageProvider == null &&
+                        representation == _RepresentationType.image
+                    ? const Icon(
+                        Icons.image_outlined,
+                        color: Colors.grey,
+                        size: 30,
+                      )
+                    : null,
           ),
           Positioned(
             right: -2,
             bottom: -2,
             child: Container(
-              width: 28,
-              height: 28,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: Colors.white,
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.black12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: const Icon(Icons.edit, size: 15),
             ),
@@ -655,12 +688,12 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
 
   Widget _buildSoldByOption({
     required String label,
-    required SoldBy value,
+    required _SoldBy value,
   }) {
-    final selected = _soldBy == value;
+    final selected = soldBy == value;
 
     return InkWell(
-      onTap: () => setState(() => _soldBy = value),
+      onTap: () => setState(() => soldBy = value),
       borderRadius: BorderRadius.circular(30),
       child: Row(
         children: [
@@ -692,7 +725,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   }
 
   Widget _buildCategoryField() {
-    final value = _categoryController.text.trim();
+    final value = category.text.trim();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -732,9 +765,9 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildBarcodeField(),
+        _buildLabel('Barcode'),
         TextFormField(
-          controller: _barcodeController,
+          controller: barcode,
           decoration: _fieldDecoration(
             hintText: 'Scan or enter barcode',
             suffixIcon: SizedBox(
@@ -751,7 +784,7 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
                     tooltip: 'Clear barcode',
                     onPressed: () {
                       setState(() {
-                        _barcodeController.clear();
+                        barcode.clear();
                       });
                     },
                     icon: const Icon(Icons.close_rounded, size: 18),
@@ -773,83 +806,154 @@ class _CreateItemScreenState extends State<CreateItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Item')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                const SizedBox(height: 8),
-                Center(child: _buildPreviewCircle()),
-                const SizedBox(height: 28),
-                _buildLabel('Product Name'),
-                TextFormField(
-                  controller: _nameController,
-                  decoration: _fieldDecoration(
-                    hintText: 'Product Name',
-                    suffixIcon: const Icon(Icons.edit_outlined, size: 18),
-                  ),
-                  validator: (v) => _validateRequired(v, 'Product Name'),
-                ),
-                const SizedBox(height: 14),
-                _buildCategoryField(),
-                const SizedBox(height: 14),
-                _buildLabel('Sold by'),
-                Row(
-                  children: [
-                    _buildSoldByOption(label: 'Each', value: SoldBy.each),
-                    const SizedBox(width: 34),
-                    _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text('Create Item'),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: Colors.black87,
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFFFFE5EE),
+                    Color(0xFFE9FFF7),
                   ],
                 ),
-                const SizedBox(height: 14),
-                _buildLabel('Selling Price'),
-                TextFormField(
-                  controller: _priceController,
-                  decoration: _fieldDecoration(hintText: 'Price'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Selling Price'),
-                ),
-                const SizedBox(height: 14),
-                _buildLabel('Cost'),
-                TextFormField(
-                  controller: _costController,
-                  decoration: _fieldDecoration(hintText: 'Cost'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) => _validateMoney(v, 'Cost'),
-                ),
-                const SizedBox(height: 14),
-                _buildBarcodeField(),
-                const SizedBox(height: 14),
-                _buildLabel('Stock Quantity'),
-                TextFormField(
-                  controller: _stockQtyController,
-                  decoration: _fieldDecoration(hintText: 'Quantity..'),
-                  keyboardType: TextInputType.number,
-                  validator: (v) => _validateWholeNumber(v, 'Stock Quantity'),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveItem,
-                    child: _isSaving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('CREATE ITEM'),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+          SafeArea(
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: [
+                  const SizedBox(height: 8),
+                  Center(child: _buildPreviewCircle()),
+                  const SizedBox(height: 28),
+
+                  _buildLabel('Product Name'),
+                  TextFormField(
+                    controller: name,
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: 'Product Name',
+                      suffixIcon: const Icon(Icons.edit_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateRequired(v, 'Product Name'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildCategoryField(),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Price'),
+                  TextFormField(
+                    controller: price,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: '0.00',
+                      suffixIcon: const Icon(Icons.payments_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateMoney(v, 'Price'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Cost'),
+                  TextFormField(
+                    controller: cost,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: '0.00',
+                      suffixIcon:
+                          const Icon(Icons.receipt_long_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateMoney(v, 'Cost'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildBarcodeField(),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Initial Stock Quantity'),
+                  TextFormField(
+                    controller: stockQty,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    decoration: _fieldDecoration(
+                      hintText: '0',
+                      suffixIcon:
+                          const Icon(Icons.inventory_2_outlined, size: 18),
+                    ),
+                    validator: (v) =>
+                        _validateWholeNumber(v, 'Initial Stock Quantity'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Sold by'),
+                  Row(
+                    children: [
+                      _buildSoldByOption(label: 'Each', value: _SoldBy.each),
+                      const SizedBox(width: 34),
+                      _buildSoldByOption(
+                        label: 'Weight',
+                        value: _SoldBy.weight,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: saving ? null : createItem,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _teal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'CREATE ITEM',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

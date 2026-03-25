@@ -18,8 +18,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
   bool _searching = false;
   final TextEditingController _searchCtrl = TextEditingController();
-
-  int _navIndex = 1;
+  DateTime _selectedDate = DateTime.now();
 
   final money = NumberFormat.currency(locale: 'en_PH', symbol: '₱');
   final timeFmt = DateFormat('h:mm a');
@@ -73,6 +72,50 @@ class _SalesScreenState extends State<SalesScreen> {
 
   DateTime get _startOfTomorrow => _startOfToday.add(const Duration(days: 1));
 
+  DateTime get _selectedDateStart =>
+      DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+
+  DateTime get _selectedDateEnd =>
+      _selectedDateStart.add(const Duration(days: 1));
+
+  bool _isSameDate(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _twoDigits(int value) => value.toString().padLeft(2, '0');
+
+  String _formatShortDate(DateTime date) {
+    final yy = (date.year % 100).toString().padLeft(2, '0');
+    return '${_twoDigits(date.month)}/${_twoDigits(date.day)}/$yy';
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year - 3),
+      lastDate: DateTime(now.year + 3),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF0E6A74),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      _selectedDate = picked;
+    });
+  }
+
   Stream<double> _todaysSalesStream(String storeId) {
     return _db
         .collection('stores')
@@ -108,10 +151,18 @@ class _SalesScreenState extends State<SalesScreen> {
 
     final q = _searchCtrl.text.trim().toLowerCase();
 
-    if (!_searching || q.isEmpty) {
+    if (q.isEmpty) {
       return col
+          .where(
+            'createdAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(_selectedDateStart),
+          )
+          .where(
+            'createdAt',
+            isLessThan: Timestamp.fromDate(_selectedDateEnd),
+          )
           .orderBy('createdAt', descending: true)
-          .limit(50)
+          .limit(100)
           .snapshots()
           .map((s) => s.docs);
     }
@@ -120,21 +171,24 @@ class _SalesScreenState extends State<SalesScreen> {
         .orderBy('invoiceNoLower')
         .startAt([q])
         .endAt(['$q\uf8ff'])
-        .limit(50)
+        .limit(200)
         .snapshots()
         .map((s) {
-          final docs = s.docs.toList();
+      final docs = s.docs.where((doc) {
+        final dt = _parseTxDate(doc.data());
+        return _isSameDate(dt, _selectedDate);
+      }).toList();
 
-          docs.sort((a, b) {
-            final ta = a.data()['createdAt'];
-            final tb = b.data()['createdAt'];
-            final da = ta is Timestamp ? ta.toDate() : DateTime(1970);
-            final db = tb is Timestamp ? tb.toDate() : DateTime(1970);
-            return db.compareTo(da);
-          });
+      docs.sort((a, b) {
+        final ta = a.data()['createdAt'];
+        final tb = b.data()['createdAt'];
+        final da = ta is Timestamp ? ta.toDate() : DateTime(1970);
+        final db = tb is Timestamp ? tb.toDate() : DateTime(1970);
+        return db.compareTo(da);
+      });
 
-          return docs;
-        });
+      return docs;
+    });
   }
 
   void _toggleSearch() {
@@ -148,7 +202,7 @@ class _SalesScreenState extends State<SalesScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const TransactionScreen(isActive: true),
+        builder: (_) => const TransactionScreen(),
       ),
     );
   }
@@ -244,76 +298,65 @@ class _SalesScreenState extends State<SalesScreen> {
         return Scaffold(
           backgroundColor: const Color(0xFFEAF5F4),
           body: SafeArea(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0xFFD7F1EE), Color(0xFFEAF5F4)],
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFFD7F1EE),
+                    Color(0xFFEAF5F4),
+                  ],
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _topBar(storeId),
+                    const SizedBox(height: 14),
+                    _todayCard(storeId),
+                    const SizedBox(height: 18),
+                    _historyHeader(),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: StreamBuilder<
+                          List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                        stream: _txListStream(storeId),
+                        builder: (context, snap) {
+                          if (snap.hasError) {
+                            return Center(
+                              child: Text('Error: ${snap.error}'),
+                            );
+                          }
+
+                          if (!snap.hasData) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+
+                          final docs = snap.data!;
+                          if (docs.isEmpty) {
+                            return const Center(
+                              child: Text('No transactions found for this date.'),
+                            );
+                          }
+
+                          return ListView.separated(
+                            padding: const EdgeInsets.only(bottom: 110),
+                            itemCount: docs.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, i) => _txTile(docs[i]),
+                          );
+                        },
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _topBar(storeId),
-                      const SizedBox(height: 14),
-                      _todayCard(storeId),
-                      const SizedBox(height: 18),
-                      const Text(
-                        "Transaction History",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF0E6A74),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: StreamBuilder<
-                            List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-                          stream: _txListStream(storeId),
-                          builder: (context, snap) {
-                            if (snap.hasError) {
-                              return Center(
-                                child: Text('Error: ${snap.error}'),
-                              );
-                            }
-
-                            if (!snap.hasData) {
-                              return const Center(
-                                child: CircularProgressIndicator(),
-                              );
-                            }
-
-                            final docs = snap.data!;
-                            if (docs.isEmpty) {
-                              return const Center(
-                                child: Text('No transactions yet.'),
-                              );
-                            }
-
-                            return ListView.separated(
-                              padding: const EdgeInsets.only(bottom: 110),
-                              itemCount: docs.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (context, i) => _txTile(docs[i]),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                _bottomNavOverlay(),
-              ],
+              ),
             ),
           ),
         );
@@ -446,6 +489,57 @@ class _SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  Widget _historyHeader() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Expanded(
+          child: Text(
+            "Transaction History",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF0E6A74),
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: _pickDate,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFFE6E6E6),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatShortDate(_selectedDate),
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 16,
+                  color: Colors.black54,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _txTile(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data();
 
@@ -515,86 +609,6 @@ class _SalesScreenState extends State<SalesScreen> {
           ],
         ),
         onTap: () => _openReceipt(doc),
-      ),
-    );
-  }
-
-  Widget _bottomNavOverlay() {
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 14,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A3B46),
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: const [
-                BoxShadow(
-                  blurRadius: 20,
-                  offset: Offset(0, 12),
-                  color: Color(0x1A000000),
-                ),
-              ],
-            ),
-            child: IconButton(
-              onPressed: _openTransactionScreen,
-              icon: const Icon(Icons.receipt_long, color: Colors.white),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 22),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            height: 62,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A3B46),
-              borderRadius: BorderRadius.circular(40),
-              boxShadow: const [
-                BoxShadow(
-                  blurRadius: 22,
-                  offset: Offset(0, 12),
-                  color: Color(0x1A000000),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _navIcon(Icons.home_outlined, 0),
-                _navIcon(Icons.receipt_long, 1),
-                const SizedBox(width: 52),
-                _navIcon(Icons.inventory_2_outlined, 2),
-                _navIcon(Icons.person_outline, 3),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _navIcon(IconData icon, int index) {
-    final active = _navIndex == index;
-
-    return InkWell(
-      onTap: () => setState(() => _navIndex = index),
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Icon(
-          icon,
-          color: active ? const Color(0xFF0A3B46) : Colors.white,
-        ),
       ),
     );
   }

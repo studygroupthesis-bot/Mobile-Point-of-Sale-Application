@@ -1,1456 +1,1465 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-
-import '../../services/receipt_share_service.dart';
-import 'receipt_screen.dart';
-
-class StorePaymentConfig {
-  final String storeName;
-  final bool gcashEnabled;
-  final String gcashQrUrl;
-
-  const StorePaymentConfig({
-    required this.storeName,
-    required this.gcashEnabled,
-    required this.gcashQrUrl,
-  });
-
-  bool get gcashUsable => gcashEnabled && gcashQrUrl.trim().isNotEmpty;
-}
-
-class TaxSummary {
-  final double subtotal;
-  final double taxableSales;
-  final double taxAmount;
-  final double total;
-
-  const TaxSummary({
-    required this.subtotal,
-    required this.taxableSales,
-    required this.taxAmount,
-    required this.total,
-  });
-}
 
 class CartItem {
   final String itemId;
   final String name;
-  final String? barcode;
   final double price;
-  int qty;
+  final String barcode;
+  final int qty;
+  final String soldBy;
+  final int? availableStock;
+  final String? imageUrl;
+  final String? representationType;
+  final int? colorValue;
 
-  CartItem({
+  const CartItem({
     required this.itemId,
     required this.name,
     required this.price,
-    this.barcode,
-    this.qty = 1,
+    required this.barcode,
+    required this.qty,
+    this.soldBy = 'each',
+    this.availableStock,
+    this.imageUrl,
+    this.representationType,
+    this.colorValue,
   });
 
-  double get total => price * qty;
+  Map<String, dynamic> toMap() {
+    return {
+      'itemId': itemId,
+      'name': name,
+      'price': price,
+      'qty': qty,
+      'barcode': barcode,
+      'soldBy': soldBy,
+      'availableStock': availableStock,
+      'imageUrl': imageUrl,
+      'representationType': representationType,
+      'colorValue': colorValue,
+    };
+  }
 }
 
 class TransactionScreen extends StatefulWidget {
+  final String? storeId;
+  final String? storeName;
   final bool isActive;
+  final List<CartItem> initialCart;
 
   const TransactionScreen({
     super.key,
-    required this.isActive,
+    this.storeId,
+    this.storeName,
+    this.isActive = true,
+    this.initialCart = const [],
   });
 
   @override
   State<TransactionScreen> createState() => _TransactionScreenState();
 }
 
-class _TransactionScreenState extends State<TransactionScreen>
-    with WidgetsBindingObserver {
-  final _searchController = TextEditingController();
-  final List<CartItem> _cart = [];
+class _TransactionScreenState extends State<TransactionScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _manualBarcodeController =
+      TextEditingController();
 
-  final MobileScannerController _scannerController = MobileScannerController(
-    autoStart: false,
-  );
+  late final MobileScannerController _scannerController;
 
-  bool _loadingAdd = false;
-  bool _loadingSuggest = false;
-  bool _processingCheckout = false;
-  bool _scannerBusy = false;
-  bool _scannerStarted = false;
+  bool _loading = true;
+  bool _addingByBarcode = false;
+  bool _searchingItems = false;
+  bool _savingTransaction = false;
+  bool _scannerEnabled = true;
 
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _suggestions = [];
-  String _lastQuery = '';
-
-  String? _lastScannedCode;
+  String? _storeId;
+  String? _storeName;
+  String? _lastScannedBarcode;
   DateTime? _lastScannedAt;
 
-  bool _taxEnabled = false;
-  String _taxName = 'VAT';
-  double _taxRate = 12.0;
-  bool _taxInclusive = true;
+  final List<Map<String, dynamic>> _cartItems = [];
+
+  static const Color _navy = Color(0xFF083B7A);
+  static const Color _teal = Color(0xFF2F9E9C);
+  static const Color _softTeal = Color(0xFFDDF1EF);
+  static const Color _pageBg = Color(0xFFEAF6F4);
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      _syncScannerState();
-      _loadTaxSettings();
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant TransactionScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    if (oldWidget.isActive != widget.isActive) {
-      _syncScannerState();
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _syncScannerState();
-      _loadTaxSettings();
-    } else {
-      _safeStopScanner();
-    }
+    _scannerController = MobileScannerController(
+      autoStart: widget.isActive,
+      facing: CameraFacing.back,
+      detectionSpeed: DetectionSpeed.normal,
+    );
+    _seedInitialCart();
+    _loadStoreContext();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
+    _manualBarcodeController.dispose();
     _scannerController.dispose();
     super.dispose();
   }
 
-  Future<void> _safeStartScanner() async {
-    if (!mounted || !widget.isActive) return;
-    if (_scannerStarted) return;
-    if (_processingCheckout) return;
-
-    try {
-      await _scannerController.start();
-      _scannerStarted = true;
-    } catch (e) {
-      debugPrint('SCANNER START ERROR: $e');
-    }
-  }
-
-  Future<void> _safeStopScanner() async {
-    if (!_scannerStarted) return;
-
-    try {
-      await _scannerController.stop();
-    } catch (e) {
-      debugPrint('SCANNER STOP ERROR: $e');
-    } finally {
-      _scannerStarted = false;
-    }
-  }
-
-  Future<void> _syncScannerState() async {
-    if (!mounted) return;
-
-    if (widget.isActive && !_processingCheckout) {
-      await _safeStartScanner();
-    } else {
-      await _safeStopScanner();
-    }
-  }
-
-  String _makeInvoiceNo(String docId) {
-    final clean = docId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
-    if (clean.isEmpty) return 'D0000000';
-    final tail = clean.length >= 7 ? clean.substring(clean.length - 7) : clean;
-    return 'D$tail';
-  }
-
-  int _safeToInt(dynamic value) {
-    if (value is int) return value;
-    if (value is double) return value.toInt();
-    if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '0') ?? 0;
-  }
-
-  double _safeToDouble(dynamic value, {double fallback = 0}) {
-    if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
-  String _formatRate(double value) {
-    if (value % 1 == 0) return value.toStringAsFixed(0);
-    return value.toStringAsFixed(2);
-  }
-
-  Future<String> _requireStoreId() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('Not logged in.');
-
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-
-    final storeId = snap.data()?['storeId'] as String?;
-    if (storeId == null || storeId.isEmpty) {
-      throw Exception('Missing storeId in users/${user.uid}.');
-    }
-    return storeId;
-  }
-
-  Future<void> _loadTaxSettings() async {
-    try {
-      final storeId = await _requireStoreId();
-      final storeDoc = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .get();
-
-      final data = storeDoc.data() ?? {};
-
-      if (!mounted) return;
-      setState(() {
-        _taxEnabled = (data['tax_enabled'] as bool?) ?? false;
-        _taxName = ((data['tax_name'] ?? 'VAT').toString().trim().isEmpty)
-            ? 'VAT'
-            : (data['tax_name'] ?? 'VAT').toString().trim();
-        _taxRate = _safeToDouble(data['tax_rate'], fallback: 12.0);
-        _taxInclusive = (data['tax_inclusive'] as bool?) ?? true;
-      });
-    } catch (e) {
-      debugPrint('LOAD TAX SETTINGS ERROR: $e');
-    }
-  }
-
-  double get subtotal => _cart.fold(0, (t, i) => t + i.total);
-
-  TaxSummary get taxSummary => _computeTaxSummary(subtotal);
-
-  double get taxAmount => taxSummary.taxAmount;
-  double get grandTotal => taxSummary.total;
-  double get taxableSales => taxSummary.taxableSales;
-
-  TaxSummary _computeTaxSummary(double baseSubtotal) {
-    if (!_taxEnabled || _taxRate <= 0) {
-      return TaxSummary(
-        subtotal: baseSubtotal,
-        taxableSales: baseSubtotal,
-        taxAmount: 0,
-        total: baseSubtotal,
+  void _seedInitialCart() {
+    for (final item in widget.initialCart) {
+      final existingIndex = _cartItems.indexWhere(
+        (cartItem) => cartItem['itemId'] == item.itemId,
       );
-    }
 
-    final rate = _taxRate / 100;
-
-    if (_taxInclusive) {
-      final taxable = baseSubtotal / (1 + rate);
-      final tax = baseSubtotal - taxable;
-
-      return TaxSummary(
-        subtotal: baseSubtotal,
-        taxableSales: taxable,
-        taxAmount: tax,
-        total: baseSubtotal,
-      );
-    }
-
-    final tax = baseSubtotal * rate;
-
-    return TaxSummary(
-      subtotal: baseSubtotal,
-      taxableSales: baseSubtotal,
-      taxAmount: tax,
-      total: baseSubtotal + tax,
-    );
-  }
-
-  void _resetSearchUi() {
-    _searchController.clear();
-    setState(() {
-      _suggestions = [];
-      _lastQuery = '';
-    });
-  }
-
-  bool _isRapidDuplicate(String code) {
-    final now = DateTime.now();
-
-    if (_lastScannedCode == code &&
-        _lastScannedAt != null &&
-        now.difference(_lastScannedAt!) < const Duration(seconds: 2)) {
-      return true;
-    }
-
-    _lastScannedCode = code;
-    _lastScannedAt = now;
-    return false;
-  }
-
-  void _addOrMergeCartItem({
-    required String itemId,
-    required String name,
-    required double price,
-    required int qty,
-    String? barcode,
-  }) {
-    final idx = _cart.indexWhere((e) => e.itemId == itemId);
-
-    setState(() {
-      if (idx >= 0) {
-        _cart[idx].qty += qty;
+      if (existingIndex >= 0) {
+        final currentQty = _toInt(_cartItems[existingIndex]['qty']);
+        _cartItems[existingIndex]['qty'] = currentQty + item.qty;
       } else {
-        _cart.add(
-          CartItem(
-            itemId: itemId,
-            name: name,
-            price: price,
-            qty: qty,
-            barcode: barcode,
-          ),
-        );
+        _cartItems.add(item.toMap());
       }
-    });
-  }
-
-  Future<int?> _askQuantity({required String itemName}) async {
-    final controller = TextEditingController(text: '1');
-
-    final qty = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Quantity'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Add quantity for:\n$itemName'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Quantity',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final q = int.tryParse(controller.text.trim());
-              if (q == null || q <= 0) return;
-              Navigator.pop(ctx, q);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-
-    controller.dispose();
-    return qty;
-  }
-
-  Future<int?> _askScannedItemQuantity({
-    required String itemName,
-    required double price,
-    String? barcode,
-  }) async {
-    final controller = TextEditingController(text: '1');
-
-    final qty = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Scanned Item'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              itemName,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text('Price: ₱ ${price.toStringAsFixed(2)}'),
-            if (barcode != null && barcode.trim().isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Barcode: $barcode',
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-            ],
-            const SizedBox(height: 14),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Quantity',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final q = int.tryParse(controller.text.trim());
-              if (q == null || q <= 0) return;
-              Navigator.pop(ctx, q);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-
-    controller.dispose();
-    return qty;
-  }
-
-  Future<void> _removeCartItem(int index) async {
-    final item = _cart[index];
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Remove item?'),
-        content: Text('Remove "${item.name}" from the transaction?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    setState(() {
-      _cart.removeAt(index);
-    });
-  }
-
-  Future<void> _fetchSuggestions(String input) async {
-    final q = input.trim().toLowerCase();
-
-    if (q.isEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _suggestions = [];
-        _loadingSuggest = false;
-        _lastQuery = '';
-      });
-      return;
     }
+  }
 
-    if (q == _lastQuery) return;
-    _lastQuery = q;
-
-    setState(() => _loadingSuggest = true);
-
+  Future<void> _loadStoreContext() async {
     try {
-      final storeId = await _requireStoreId();
+      if (widget.storeId != null && widget.storeId!.trim().isNotEmpty) {
+        setState(() {
+          _storeId = widget.storeId!.trim();
+          _storeName = widget.storeName;
+          _loading = false;
+        });
+        return;
+      }
 
-      final snap = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('items')
-          .orderBy('nameLower')
-          .startAt([q])
-          .endAt(['$q\uf8ff'])
-          .limit(8)
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Not logged in. Please login again.');
+      }
+
+      final userSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
           .get();
 
+      final data = userSnap.data() ?? <String, dynamic>{};
+      final resolvedStoreId = (data['storeId'] as String?)?.trim();
+
+      if (resolvedStoreId == null || resolvedStoreId.isEmpty) {
+        throw Exception('No storeId found for this user.');
+      }
+
+      String? resolvedStoreName = widget.storeName;
+      try {
+        final storeSnap = await FirebaseFirestore.instance
+            .collection('stores')
+            .doc(resolvedStoreId)
+            .get();
+
+        resolvedStoreName =
+            (storeSnap.data()?['business_name'] as String?)?.trim() ??
+                (storeSnap.data()?['storeName'] as String?)?.trim() ??
+                resolvedStoreName;
+      } catch (_) {}
+
       if (!mounted) return;
       setState(() {
-        _suggestions = snap.docs;
-        _loadingSuggest = false;
+        _storeId = resolvedStoreId;
+        _storeName = resolvedStoreName;
+        _loading = false;
       });
     } catch (e) {
-      debugPrint('SUGGEST ERROR: $e');
       if (!mounted) return;
-      setState(() => _loadingSuggest = false);
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load transaction screen: $e')),
+      );
     }
   }
 
-  Future<void> _addFromDoc(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  String _normalizeBarcodeValue(dynamic value) {
+    if (value == null) return '';
+    var text = value.toString().trim().replaceAll(RegExp(r'\s+'), '');
+    if (text.endsWith('.0')) {
+      text = text.substring(0, text.length - 2);
+    }
+    return text;
+  }
+
+  String _firstNonEmptyString(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
+  double _toDouble(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString().trim()) ?? 0;
+  }
+
+  int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString().trim()) ?? 0;
+  }
+
+  String _extractItemName(Map<String, dynamic> data) {
+    final name = _firstNonEmptyString(data, [
+      'name',
+      'itemName',
+      'productName',
+      'item_name',
+      'title',
+      'label',
+    ]);
+    return name.isEmpty ? 'Unnamed Item' : name;
+  }
+
+  String _extractItemCategory(Map<String, dynamic> data) {
+    return _firstNonEmptyString(data, [
+      'category',
+      'itemCategory',
+      'productCategory',
+      'type',
+    ]);
+  }
+
+  String _extractItemCode(Map<String, dynamic> data) {
+    return _firstNonEmptyString(data, [
+      'itemCode',
+      'sku',
+      'code',
+    ]);
+  }
+
+  String _extractItemBarcode(Map<String, dynamic> data) {
+    final raw = _firstNonEmptyString(data, [
+      'barcode',
+      'barcodeValue',
+      'barcodeNumber',
+      'sku',
+      'itemCode',
+      'code',
+    ]);
+    return _normalizeBarcodeValue(raw);
+  }
+
+  String _extractSoldBy(Map<String, dynamic> data) {
+    final soldBy = _firstNonEmptyString(data, [
+      'soldBy',
+      'unit',
+      'unitType',
+      'measure',
+    ]);
+    return soldBy.isEmpty ? 'each' : soldBy;
+  }
+
+  double _extractPrice(Map<String, dynamic> data) {
+    return _toDouble(
+      data['price'] ??
+          data['sellingPrice'] ??
+          data['unitPrice'] ??
+          data['amount'] ??
+          0,
+    );
+  }
+
+  int _extractStock(Map<String, dynamic> data) {
+    return _toInt(
+      data['stockQty'] ??
+          data['stock'] ??
+          data['quantity'] ??
+          data['stocks'] ??
+          data['currentStock'] ??
+          0,
+    );
+  }
+
+  bool _matchesSearch(Map<String, dynamic> data, String rawQuery) {
+    final query = rawQuery.trim().toLowerCase();
+    if (query.isEmpty) return false;
+
+    final fields = [
+      _extractItemName(data).toLowerCase(),
+      _firstNonEmptyString(data, ['nameLower']).toLowerCase(),
+      _extractItemCategory(data).toLowerCase(),
+      _extractItemBarcode(data).toLowerCase(),
+      _extractItemCode(data).toLowerCase(),
+      _firstNonEmptyString(data, ['brand']).toLowerCase(),
+      _firstNonEmptyString(data, ['description']).toLowerCase(),
+    ];
+
+    return fields.any((field) => field.isNotEmpty && field.contains(query));
+  }
+
+  int _searchRank(Map<String, dynamic> data, String rawQuery) {
+    final query = rawQuery.trim().toLowerCase();
+
+    final name = _extractItemName(data).toLowerCase();
+    final barcode = _extractItemBarcode(data).toLowerCase();
+    final code = _extractItemCode(data).toLowerCase();
+    final category = _extractItemCategory(data).toLowerCase();
+
+    if (name == query || barcode == query || code == query) return 0;
+    if (name.startsWith(query) || code.startsWith(query)) return 1;
+    if (name.contains(query)) return 2;
+    if (category.contains(query)) return 3;
+    if (barcode.contains(query) || code.contains(query)) return 4;
+    return 5;
+  }
+
+  double get _cartTotal {
+    double total = 0;
+    for (final item in _cartItems) {
+      final price = _toDouble(item['price']);
+      final qty = _toInt(item['qty']);
+      total += price * qty;
+    }
+    return total;
+  }
+
+  int get _cartItemCount {
+    int total = 0;
+    for (final item in _cartItems) {
+      total += _toInt(item['qty']);
+    }
+    return total;
+  }
+
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _findItemByBarcode(
+    String rawBarcode,
   ) async {
-    final d = doc.data();
-    final name = (d['name'] ?? '').toString();
-    final price = (d['price'] as num?)?.toDouble() ?? 0.0;
-    final barcode = (d['barcode'] ?? '').toString();
+    final storeId = _storeId;
+    final normalized = _normalizeBarcodeValue(rawBarcode);
 
-    final qty = await _askQuantity(itemName: name);
-    if (qty == null) return;
-
-    _addOrMergeCartItem(
-      itemId: doc.id,
-      name: name,
-      price: price,
-      qty: qty,
-      barcode: barcode,
-    );
-
-    _resetSearchUi();
-  }
-
-  Future<void> _openBarcodeInputDialog() async {
-    final controller = TextEditingController();
-
-    await _safeStopScanner();
-
-    final code = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Scan / Enter Barcode'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Barcode',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-
-    controller.dispose();
-
-    if (mounted && widget.isActive) {
-      await _safeStartScanner();
+    if (storeId == null || storeId.isEmpty || normalized.isEmpty) {
+      return null;
     }
 
-    if (code == null || code.trim().isEmpty) return;
-    await _addItemByBarcode(code.trim(), showScannedDialog: false);
-  }
+    final collection = FirebaseFirestore.instance
+        .collection('stores')
+        .doc(storeId)
+        .collection('items');
 
-  Future<void> _handleEmbeddedScan(BarcodeCapture capture) async {
-    if (!widget.isActive) return;
-    if (_scannerBusy || _loadingAdd || _processingCheckout) return;
+    final exactFields = [
+      'barcode',
+      'barcodeValue',
+      'barcodeNumber',
+      'sku',
+      'itemCode',
+      'code',
+    ];
 
-    final codes = capture.barcodes;
-    if (codes.isEmpty) return;
+    for (final field in exactFields) {
+      final snap = await collection.where(field, isEqualTo: normalized).limit(1).get();
+      if (snap.docs.isNotEmpty) return snap.docs.first;
+    }
 
-    final value = codes.first.rawValue?.trim();
-    if (value == null || value.isEmpty) return;
+    final allDocs = await collection.get();
+    for (final doc in allDocs.docs) {
+      final data = doc.data();
+      final candidates = [
+        data['barcode'],
+        data['barcodeValue'],
+        data['barcodeNumber'],
+        data['sku'],
+        data['itemCode'],
+        data['code'],
+      ];
 
-    if (_isRapidDuplicate(value)) return;
-
-    _scannerBusy = true;
-    await _safeStopScanner();
-
-    try {
-      await _addItemByBarcode(value, showScannedDialog: true);
-    } finally {
-      _scannerBusy = false;
-      if (mounted && widget.isActive && !_processingCheckout) {
-        await _safeStartScanner();
+      for (final candidate in candidates) {
+        if (_normalizeBarcodeValue(candidate) == normalized) {
+          return doc;
+        }
       }
     }
+
+    return null;
   }
 
-  Future<void> _addItemByBarcode(
-    String barcode, {
-    required bool showScannedDialog,
-  }) async {
-    setState(() => _loadingAdd = true);
+  void _addItemDocumentToCart(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? <String, dynamic>{};
+    final name = _extractItemName(data);
+    final price = _extractPrice(data);
+    final barcode = _extractItemBarcode(data);
+    final soldBy = _extractSoldBy(data);
+    final availableStock = _extractStock(data);
+
+    final existingIndex = _cartItems.indexWhere(
+      (item) => item['itemId'] == doc.id,
+    );
+
+    setState(() {
+      if (existingIndex >= 0) {
+        final currentQty = _toInt(_cartItems[existingIndex]['qty']);
+        if (availableStock <= 0 || currentQty >= availableStock) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Maximum stock reached for $name.')),
+          );
+          return;
+        }
+
+        _cartItems[existingIndex]['qty'] = currentQty + 1;
+      } else {
+        if (availableStock <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$name is out of stock.')),
+          );
+          return;
+        }
+
+        _cartItems.add({
+          'itemId': doc.id,
+          'name': name,
+          'price': price,
+          'barcode': barcode,
+          'qty': 1,
+          'soldBy': soldBy,
+          'availableStock': availableStock,
+          'imageUrl': data['imageUrl'],
+          'representationType': data['representationType'],
+          'colorValue': data['colorValue'],
+        });
+      }
+    });
+  }
+
+  Future<void> _addItemByBarcode(String rawBarcode) async {
+    final normalized = _normalizeBarcodeValue(rawBarcode);
+
+    if (normalized.isEmpty) return;
+    if (_addingByBarcode) return;
+
+    setState(() => _addingByBarcode = true);
 
     try {
-      final storeId = await _requireStoreId();
+      final doc = await _findItemByBarcode(normalized);
+      if (!mounted) return;
 
-      final q = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .collection('items')
-          .where('barcode', isEqualTo: barcode)
-          .limit(1)
-          .get();
-
-      if (q.docs.isEmpty) {
-        if (!mounted) return;
+      if (doc == null || !doc.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No item found for barcode: $barcode')),
+          SnackBar(content: Text('No item found for barcode: $normalized')),
         );
         return;
       }
 
-      final doc = q.docs.first;
-      final d = doc.data();
-      final name = (d['name'] ?? '').toString();
-      final price = (d['price'] as num?)?.toDouble() ?? 0.0;
-      final savedBarcode = (d['barcode'] ?? '').toString();
-
-      final qty = showScannedDialog
-          ? await _askScannedItemQuantity(
-              itemName: name,
-              price: price,
-              barcode: savedBarcode,
-            )
-          : await _askQuantity(itemName: name);
-
-      if (qty == null) return;
-
-      _addOrMergeCartItem(
-        itemId: doc.id,
-        name: name,
-        price: price,
-        qty: qty,
-        barcode: savedBarcode,
-      );
-
-      _resetSearchUi();
+      _addItemDocumentToCart(doc);
     } catch (e) {
-      debugPrint('BARCODE ERROR: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error adding item: $e')),
+        SnackBar(content: Text('Failed to add barcode: $e')),
       );
     } finally {
-      if (mounted) setState(() => _loadingAdd = false);
+      if (mounted) {
+        setState(() => _addingByBarcode = false);
+      }
     }
   }
 
-  Future<StorePaymentConfig> _fetchStorePaymentConfigSafe() async {
-    try {
-      final storeId = await _requireStoreId();
-      final storeDoc = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(storeId)
-          .get();
+  Future<void> _handleBarcodeDetection(BarcodeCapture capture) async {
+    if (!_scannerEnabled || _addingByBarcode) return;
 
-      final data = storeDoc.data() ?? {};
+    final code = capture.barcodes
+        .map((e) => e.rawValue?.trim() ?? '')
+        .firstWhere((e) => e.isNotEmpty, orElse: () => '');
 
-      final storeName =
-          (data['business_name'] ?? data['name'] ?? 'Business Sale').toString();
+    if (code.isEmpty) return;
 
-      final payment = (data['payment'] as Map<String, dynamic>?) ?? {};
-      final gcashEnabled = (data['accept_gcash'] as bool?) ??
-          (payment['gcashEnabled'] as bool?) ??
-          false;
-      final gcashQrUrl =
-          (data['gcashQrUrl'] ?? payment['gcashQrUrl'] ?? '').toString();
-
-      return StorePaymentConfig(
-        storeName: storeName,
-        gcashEnabled: gcashEnabled,
-        gcashQrUrl: gcashQrUrl,
-      );
-    } catch (e) {
-      debugPrint('PAYMENT CONFIG ERROR: $e');
-      return const StorePaymentConfig(
-        storeName: 'Business Sale',
-        gcashEnabled: false,
-        gcashQrUrl: '',
-      );
+    final now = DateTime.now();
+    if (_lastScannedBarcode == code &&
+        _lastScannedAt != null &&
+        now.difference(_lastScannedAt!) < const Duration(seconds: 2)) {
+      return;
     }
-  }
 
-  Future<void> _startCheckout() async {
-    if (_cart.isEmpty || _processingCheckout) return;
+    _lastScannedBarcode = code;
+    _lastScannedAt = now;
 
-    setState(() => _processingCheckout = true);
+    _scannerEnabled = false;
+    await _scannerController.stop();
+    await _addItemByBarcode(code);
 
-    final config = await _fetchStorePaymentConfigSafe();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
+    _scannerEnabled = true;
+    await _scannerController.start();
+  }
 
-    await showModalBottomSheet<void>(
+  Future<void> _showManualBarcodeDialog() async {
+    _manualBarcodeController.clear();
+
+    final result = await showDialog<String>(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Select Payment Method',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                ),
-                const SizedBox(height: 12),
-                ListTile(
-                  leading: const Icon(Icons.payments),
-                  title: const Text('Cash'),
-                  subtitle: const Text('Confirm amount received'),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await _cashFlow(config);
-                  },
-                ),
-                ListTile(
-                  leading: Icon(
-                    Icons.qr_code,
-                    color: config.gcashUsable ? null : Colors.black26,
-                  ),
-                  title: Text(
-                    'GCash',
-                    style: TextStyle(
-                      color: config.gcashUsable ? null : Colors.black26,
-                    ),
-                  ),
-                  subtitle: Text(
-                    config.gcashUsable
-                        ? 'Show store QR code'
-                        : 'Unavailable (disabled or QR not set)',
-                    style: TextStyle(
-                      color: config.gcashUsable ? null : Colors.black26,
-                    ),
-                  ),
-                  onTap: config.gcashUsable
-                      ? () async {
-                          Navigator.pop(ctx);
-                          await _gcashFlow(config);
-                        }
-                      : null,
-                ),
-              ],
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Enter Barcode'),
+          content: TextField(
+            controller: _manualBarcodeController,
+            autofocus: true,
+            keyboardType: TextInputType.text,
+            decoration: const InputDecoration(
+              hintText: 'Type or paste barcode',
             ),
+            onSubmitted: (_) {
+              Navigator.pop(context, _manualBarcodeController.text.trim());
+            },
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context, _manualBarcodeController.text.trim());
+              },
+              child: const Text('Add'),
+            ),
+          ],
         );
       },
     );
 
-    if (mounted) {
-      setState(() => _processingCheckout = false);
-      _syncScannerState();
-    }
+    if (result == null || result.trim().isEmpty) return;
+    await _addItemByBarcode(result);
   }
 
-  Future<void> _cashFlow(StorePaymentConfig config) async {
-    final controller = TextEditingController();
+  Future<void> _searchAndPickItem() async {
+    final storeId = _storeId;
+    final rawQuery = _searchController.text.trim();
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cash Payment'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Grand Total: ₱ ${grandTotal.toStringAsFixed(2)}'),
-            const SizedBox(height: 10),
-            TextField(
-              controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Amount received',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
+    if (storeId == null || storeId.isEmpty) return;
 
-    if (confirm != true) {
-      controller.dispose();
-      return;
-    }
-
-    final received = double.tryParse(controller.text.trim());
-    controller.dispose();
-
-    if (received == null || received < grandTotal) {
-      if (!mounted) return;
+    if (rawQuery.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Amount received must be greater than or equal to total.'),
-        ),
+        const SnackBar(content: Text('Enter an item name first.')),
       );
       return;
     }
 
-    await _completeSale(
-      config: config,
-      paymentMode: 'Cash',
-      amountReceived: received,
-    );
-  }
+    setState(() => _searchingItems = true);
 
-  Future<void> _gcashFlow(StorePaymentConfig config) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('GCash Payment'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Grand Total: ₱ ${grandTotal.toStringAsFixed(2)}'),
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: Image.network(
-                  config.gcashQrUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) {
-                    return const Center(child: Text('QR failed to load'));
-                  },
+    try {
+      final collection = FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .collection('items');
+
+      final barcodeMatch = await _findItemByBarcode(rawQuery);
+      if (!mounted) return;
+
+      if (barcodeMatch != null && barcodeMatch.exists) {
+        _addItemDocumentToCart(barcodeMatch);
+        _searchController.clear();
+        return;
+      }
+
+      final snap = await collection.get();
+
+      final results = snap.docs.where((doc) {
+        final data = doc.data();
+        return _matchesSearch(data, rawQuery);
+      }).toList()
+        ..sort((a, b) {
+          final rankA = _searchRank(a.data(), rawQuery);
+          final rankB = _searchRank(b.data(), rawQuery);
+          return rankA.compareTo(rankB);
+        });
+
+      if (!mounted) return;
+
+      if (results.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No items found for "$rawQuery".')),
+        );
+        return;
+      }
+
+      if (results.length == 1) {
+        _addItemDocumentToCart(results.first);
+        _searchController.clear();
+        return;
+      }
+
+      final picked = await showModalBottomSheet<
+          DocumentSnapshot<Map<String, dynamic>>>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          final maxHeight = MediaQuery.of(context).size.height * 0.65;
+
+          return SafeArea(
+            child: SizedBox(
+              height: maxHeight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Select Item',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: results.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final doc = results[index];
+                          final data = doc.data();
+                          final name = _extractItemName(data);
+                          final category = _extractItemCategory(data);
+                          final price = _extractPrice(data);
+                          final stock = _extractStock(data);
+
+                          return ListTile(
+                            title: Text(name),
+                            subtitle: Text(
+                              '${category.isEmpty ? 'Uncategorized' : category} • Stock: $stock • ₱${price.toStringAsFixed(2)}',
+                            ),
+                            onTap: () => Navigator.pop(context, doc),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            const Text(
-              'Let the customer scan the QR code, then confirm payment.',
-              style: TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
+          );
+        },
+      );
 
-    if (confirm != true) return;
-
-    await _completeSale(
-      config: config,
-      paymentMode: 'GCash',
-      amountReceived: grandTotal,
-    );
+      if (picked != null) {
+        _addItemDocumentToCart(picked);
+        _searchController.clear();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to search items: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _searchingItems = false);
+      }
+    }
   }
 
-  Future<void> _completeSale({
-    required StorePaymentConfig config,
-    required String paymentMode,
-    required double amountReceived,
-  }) async {
+  void _increaseQty(int index) {
+    final currentQty = _toInt(_cartItems[index]['qty']);
+    final rawAvailableStock = _cartItems[index]['availableStock'];
+    final int? availableStock =
+        rawAvailableStock == null ? null : _toInt(rawAvailableStock);
+    final name = _cartItems[index]['name']?.toString() ?? 'Item';
+
+    if (availableStock != null &&
+        availableStock > 0 &&
+        currentQty >= availableStock) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Maximum stock reached for $name.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _cartItems[index]['qty'] = currentQty + 1;
+    });
+  }
+
+  void _decreaseQty(int index) {
+    final currentQty = _toInt(_cartItems[index]['qty']);
+
+    setState(() {
+      if (currentQty <= 1) {
+        _cartItems.removeAt(index);
+      } else {
+        _cartItems[index]['qty'] = currentQty - 1;
+      }
+    });
+  }
+
+  void _removeItem(int index) {
+    setState(() {
+      _cartItems.removeAt(index);
+    });
+  }
+
+  Future<void> _proceedToTransact() async {
+    if (_cartItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items scanned yet.')),
+      );
+      return;
+    }
+
+    final storeId = _storeId;
+    if (storeId == null || storeId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Store is not available right now.')),
+      );
+      return;
+    }
+
+    final paymentResult = await _showPaymentSheet();
+    if (paymentResult == null) return;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Not logged in.')),
+        const SnackBar(content: Text('Not logged in. Please login again.')),
       );
       return;
     }
 
+    final total = _cartTotal;
+    final amountReceived = paymentResult['amountReceived'] as double;
+    final paymentMode = paymentResult['paymentMode'] as String;
+    final change = paymentResult['change'] as double;
+
+    setState(() => _savingTransaction = true);
+
     try {
-      final storeId = await _requireStoreId();
-      final summary = taxSummary;
-
-      final change = paymentMode.toLowerCase() == 'cash'
-          ? (amountReceived - summary.total)
-          : 0.0;
-
-      final firestore = FirebaseFirestore.instance;
-      final txRef = firestore
-          .collection('stores')
-          .doc(storeId)
-          .collection('transactions')
-          .doc();
-
+      final db = FirebaseFirestore.instance;
+      final txRef =
+          db.collection('stores').doc(storeId).collection('transactions').doc();
       final now = DateTime.now();
-      final invoiceNo = _makeInvoiceNo(txRef.id);
 
-      final cashierName =
-          (user.displayName != null && user.displayName!.trim().isNotEmpty)
-              ? user.displayName!.trim()
-              : ((user.email != null && user.email!.trim().isNotEmpty)
-                  ? user.email!.trim()
-                  : user.uid);
-
-      final itemsPayload = _cart.map((i) {
+      final items = _cartItems.map((item) {
+        final price = _toDouble(item['price']);
+        final qty = _toInt(item['qty']);
         return {
-          'itemId': i.itemId,
-          'name': i.name,
-          'barcode': i.barcode,
-          'price': i.price,
-          'qty': i.qty,
-          'total': i.total,
+          'itemId': item['itemId'],
+          'name': item['name'],
+          'price': price,
+          'qty': qty,
+          'barcode': item['barcode'],
+          'soldBy': item['soldBy'] ?? 'each',
+          'availableStock': item['availableStock'],
+          'imageUrl': item['imageUrl'],
+          'representationType': item['representationType'],
+          'colorValue': item['colorValue'],
+          'lineTotal': price * qty,
         };
       }).toList();
 
-      final transactionData = <String, dynamic>{
-        'createdAt': FieldValue.serverTimestamp(),
-        'createdAtLocal': now.toIso8601String(),
+      final invoiceNo = 'INV-${now.millisecondsSinceEpoch}';
+      final batch = db.batch();
+
+      batch.set(txRef, {
         'invoiceId': txRef.id,
         'invoiceNo': invoiceNo,
-        'receiptNumber': invoiceNo,
         'invoiceNoLower': invoiceNo.toLowerCase(),
         'storeId': storeId,
-        'storeName': config.storeName,
-        'paymentMethod': paymentMode,
-        'paymentMode': paymentMode,
-        'total': summary.total,
-        'status': 'Success',
+        'storeName': (_storeName == null || _storeName!.trim().isEmpty)
+            ? 'Store'
+            : _storeName!.trim(),
         'cashierUid': user.uid,
-        'cashierName': cashierName,
-        'subtotal': summary.subtotal,
-        'taxableSales': summary.taxableSales,
-        'taxEnabled': _taxEnabled,
-        'taxName': _taxName,
-        'taxRate': _taxRate,
-        'taxInclusive': _taxInclusive,
-        'tax': summary.taxAmount,
-        'grandTotal': summary.total,
+        'status': 'success',
+        'createdAt': FieldValue.serverTimestamp(),
+        'createdAtLocal': now.toIso8601String(),
+        'paymentMode': paymentMode,
+        'paymentMethod': paymentMode,
+        'subtotal': total,
+        'taxableSales': total,
+        'taxEnabled': false,
+        'taxName': 'VAT',
+        'taxRate': 12.0,
+        'taxInclusive': true,
+        'tax': 0.0,
+        'taxAmount': 0.0,
+        'grandTotal': total,
+        'total': total,
         'amountReceived': amountReceived,
         'change': change,
-        'items': itemsPayload,
-      };
-
-      await firestore.runTransaction((transaction) async {
-        final itemRefs = <String, DocumentReference<Map<String, dynamic>>>{};
-        final currentStocks = <String, int>{};
-
-        for (final cartItem in _cart) {
-          final itemRef = firestore
-              .collection('stores')
-              .doc(storeId)
-              .collection('items')
-              .doc(cartItem.itemId);
-
-          final itemSnap = await transaction.get(itemRef);
-
-          if (!itemSnap.exists) {
-            throw Exception('Item "${cartItem.name}" no longer exists.');
-          }
-
-          final data = itemSnap.data() as Map<String, dynamic>? ?? {};
-          final currentStock = _safeToInt(data['stockQty']);
-
-          if (currentStock < cartItem.qty) {
-            throw Exception(
-              'Not enough stock for "${cartItem.name}". '
-              'Available: $currentStock, Requested: ${cartItem.qty}',
-            );
-          }
-
-          itemRefs[cartItem.itemId] = itemRef;
-          currentStocks[cartItem.itemId] = currentStock;
-        }
-
-        transaction.set(txRef, transactionData);
-
-        for (final cartItem in _cart) {
-          final itemRef = itemRefs[cartItem.itemId]!;
-          final currentStock = currentStocks[cartItem.itemId]!;
-          final newStock = currentStock - cartItem.qty;
-
-          transaction.update(itemRef, {
-            'stockQty': newStock,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          final stockLogRef = firestore
-              .collection('stores')
-              .doc(storeId)
-              .collection('stock_logs')
-              .doc();
-
-          transaction.set(stockLogRef, {
-            'createdAt': FieldValue.serverTimestamp(),
-            'itemId': cartItem.itemId,
-            'itemName': cartItem.name,
-            'barcode': cartItem.barcode,
-            'type': 'stock_out',
-            'reason': 'sale',
-            'qty': cartItem.qty,
-            'beforeQty': currentStock,
-            'afterQty': newStock,
-            'referenceId': txRef.id,
-            'referenceType': 'transaction',
-            'invoiceNo': invoiceNo,
-            'cashierUid': user.uid,
-          });
-        }
+        'items': items,
       });
 
-      final receiptShare =
-          await ReceiptShareService.instance.ensurePublicReceipt(
-        storeId: storeId,
-        transactionId: txRef.id,
-        transactionData: transactionData,
-      );
+      for (final item in _cartItems) {
+        final itemId = (item['itemId'] ?? '').toString().trim();
+        if (itemId.isEmpty) continue;
 
-      final receipt = ReceiptData(
-        invoiceId: txRef.id,
-        invoiceNo: invoiceNo,
-        storeName: config.storeName,
-        dateTime: now,
-        paymentMode: paymentMode,
-        cashierUid: user.uid,
-        subtotal: summary.subtotal,
-        taxableSales: summary.taxableSales,
-        taxEnabled: _taxEnabled,
-        taxName: _taxName,
-        taxRate: _taxRate,
-        taxInclusive: _taxInclusive,
-        tax: summary.taxAmount,
-        grandTotal: summary.total,
-        amountReceived: amountReceived,
-        change: change,
-        items: _cart
-            .map((c) => ReceiptLine(name: c.name, price: c.price, qty: c.qty))
-            .toList(),
-      );
+        final itemRef =
+            db.collection('stores').doc(storeId).collection('items').doc(itemId);
+        final purchasedQty = _toInt(item['qty']);
+        final currentStock = _toInt(item['availableStock']);
+        final updatedStock = (currentStock - purchasedQty).clamp(0, 1 << 30);
 
-      if (!mounted) return;
-
-      await _safeStopScanner();
-
-      setState(() {
-        _cart.clear();
-        _suggestions = [];
-        _lastQuery = '';
-        _searchController.clear();
-      });
-
-      await Future.delayed(const Duration(milliseconds: 120));
-
-      if (!mounted) return;
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ReceiptScreen(
-            data: receipt,
-            receiptUrl: receiptShare.url,
-          ),
-        ),
-      );
-
-      if (mounted && widget.isActive) {
-        await _safeStartScanner();
+        batch.update(itemRef, {
+          'stockQty': updatedStock,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       }
-    } on FirebaseException catch (e) {
+
+      await batch.commit();
+
       if (!mounted) return;
+      setState(() {
+        _savingTransaction = false;
+        _cartItems.clear();
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Checkout failed: ${e.message ?? e.code}')),
+        const SnackBar(content: Text('Transaction saved successfully.')),
       );
     } catch (e) {
       if (!mounted) return;
+      setState(() => _savingTransaction = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Checkout failed: $e')),
+        SnackBar(content: Text('Failed to save transaction: $e')),
       );
     }
   }
 
+  Future<Map<String, dynamic>?> _showPaymentSheet() async {
+    final amountController = TextEditingController();
+    String paymentMode = 'Cash';
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final total = _cartTotal;
+            final amountReceived =
+                double.tryParse(amountController.text.trim()) ?? 0.0;
+            final change = amountReceived - total;
+
+            return Container(
+              padding: EdgeInsets.fromLTRB(
+                18,
+                18,
+                18,
+                18 + MediaQuery.of(context).viewInsets.bottom,
+              ),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF5FBFA),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Payment',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Total Amount',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '₱${total.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                            color: _navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: paymentMode,
+                    items: const [
+                      DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                      DropdownMenuItem(value: 'GCash', child: Text('GCash')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setModalState(() {
+                        paymentMode = value;
+                      });
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Payment Mode',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onChanged: (_) => setModalState(() {}),
+                    decoration: InputDecoration(
+                      labelText: paymentMode == 'Cash'
+                          ? 'Amount Received'
+                          : 'Reference Amount',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (paymentMode == 'Cash')
+                    Row(
+                      children: [
+                        const Text(
+                          'Change',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '₱${change.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: change < 0 ? Colors.red : _navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final total = _cartTotal;
+                        final amountReceived =
+                            double.tryParse(amountController.text.trim()) ?? 0.0;
+
+                        if (amountReceived <= 0) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('Enter a valid amount first.'),
+                            ),
+                          );
+                          return;
+                        }
+
+                        if (paymentMode == 'Cash' && amountReceived < total) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('Amount received is not enough.'),
+                            ),
+                          );
+                          return;
+                        }
+
+                        Navigator.pop(sheetContext, {
+                          'paymentMode': paymentMode,
+                          'amountReceived': amountReceived,
+                          'change': paymentMode == 'Cash'
+                              ? amountReceived - total
+                              : 0.0,
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _teal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text(
+                        'Confirm Transaction',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    amountController.dispose();
+    return result;
+  }
+
   Widget _buildScannerCard() {
     return Container(
-      height: 130,
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (widget.isActive)
-              MobileScanner(
-                controller: _scannerController,
-                onDetect: _handleEmbeddedScan,
-              )
-            else
-              Container(
-                color: Colors.black,
-                alignment: Alignment.center,
-                child: const Text(
-                  'Scanner paused',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Barcode Scanner',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: SizedBox(
+              height: 170,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(color: _softTeal),
+                  MobileScanner(
+                    controller: _scannerController,
+                    fit: BoxFit.cover,
+                    onDetect: _handleBarcodeDetection,
                   ),
-                ),
-              ),
-            Center(
-              child: Container(
-                width: 220,
-                height: 70,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 2.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFB8E1DD)),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      width: 220,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white, width: 3),
+                        color: Colors.transparent,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(130),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Align barcode inside the frame',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_addingByBarcode)
+                    Container(
+                      color: Colors.black.withAlpha(85),
+                      child: const Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      ),
+                    ),
+                ],
               ),
             ),
-            if (_loadingAdd || _scannerBusy)
-              Container(
-                color: Colors.black26,
-                alignment: Alignment.center,
-                child: const SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: Colors.white,
-                  ),
-                ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _showManualBarcodeDialog,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF6A4FC8),
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 0),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  !widget.isActive
-                      ? 'Scanner is active only on the Transaction tab'
-                      : _loadingAdd
-                          ? 'Looking up scanned item...'
-                          : _scannerBusy
-                              ? 'Processing scan...'
-                              : 'Align barcode inside the frame',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+              child: const Text(
+                'Enter barcode manually',
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _summaryRow(
-    String label,
-    String value, {
-    bool bold = false,
-    Color? valueColor,
-  }) {
-    final labelStyle = TextStyle(
-      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-      fontSize: 14,
-    );
-
-    final valueStyle = TextStyle(
-      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-      fontSize: 14,
-      color: valueColor,
-    );
-
+  Widget _buildSearchRow() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: labelStyle),
-        Text(value, style: valueStyle),
+        Expanded(
+          child: TextField(
+            controller: _searchController,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _searchAndPickItem(),
+            decoration: InputDecoration(
+              hintText: 'Search item name...',
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: const Icon(Icons.search_rounded),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          height: 54,
+          child: ElevatedButton(
+            onPressed: _searchingItems ? null : _searchAndPickItem,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _teal,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+            ),
+            child: _searchingItems
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Add Item'),
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildCartList({
+    bool shrinkWrap = false,
+    ScrollPhysics? physics,
+  }) {
+    if (_cartItems.isEmpty) {
+      return Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 180),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'No items scanned yet',
+              style: TextStyle(
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ListView.separated(
+        shrinkWrap: shrinkWrap,
+        physics: physics,
+        padding: const EdgeInsets.all(12),
+        itemCount: _cartItems.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final item = _cartItems[index];
+          final name = item['name']?.toString() ?? 'Item';
+          final price = _toDouble(item['price']);
+          final qty = _toInt(item['qty']);
+          final soldBy = item['soldBy']?.toString() ?? 'each';
+
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _softTeal,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBFE7E2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.inventory_2_rounded,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '₱${price.toStringAsFixed(2)} • $soldBy',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      onPressed: () => _decreaseQty(index),
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
+                    ),
+                    Text(
+                      '$qty',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => _increaseQty(index),
+                      icon: const Icon(Icons.add_circle_outline_rounded),
+                    ),
+                    IconButton(
+                      onPressed: () => _removeItem(index),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildBottomSummary() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Items',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Text(
+                '$_cartItemCount',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                'Total',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '₱${_cartTotal.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: _navy,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _cartItems.isEmpty || _savingTransaction
+                  ? null
+                  : _proceedToTransact,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _teal,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.black12,
+                disabledForegroundColor: Colors.black38,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              child: _savingTransaction
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'TRANSACT',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final summary = taxSummary;
-    final taxLabel = _taxInclusive
-        ? '$_taxName (${_formatRate(_taxRate)}% incl.)'
-        : '$_taxName (${_formatRate(_taxRate)}%)';
+    final subtitleName = _storeName?.trim();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7CBD0),
-      body: SafeArea(
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFFE6F7F5),
-                  Color(0xFFD5F0EC),
-                ],
+      backgroundColor: _pageBg,
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: _pageBg,
+        foregroundColor: Colors.black87,
+        title: const Text(
+          'Transaction',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        centerTitle: true,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+                    child: ConstrainedBox(
+                      constraints:
+                          BoxConstraints(minHeight: constraints.maxHeight),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildScannerCard(),
+                          const SizedBox(height: 12),
+                          _buildSearchRow(),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Transaction',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitleName == null || subtitleName.isEmpty
+                                ? 'Scan/Add Item to transact...'
+                                : 'Scan/Add Item to transact for $subtitleName...',
+                            style: const TextStyle(color: Colors.black54),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildCartList(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                          ),
+                          const SizedBox(height: 12),
+                          _buildBottomSummary(),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Barcode Scanner',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildScannerCard(),
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: _loadingAdd ? null : _openBarcodeInputDialog,
-                    child: const Text('Enter barcode manually'),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: _fetchSuggestions,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          hintText: 'Search item name...',
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00A88B),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                      ),
-                      onPressed: null,
-                      child: const Text('Add Item'),
-                    ),
-                  ],
-                ),
-                if (_loadingSuggest)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: LinearProgressIndicator(minHeight: 2),
-                  ),
-                if (_suggestions.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.06),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: _suggestions.map((doc) {
-                        final d = doc.data();
-                        final name = (d['name'] ?? '').toString();
-                        final price = (d['price'] as num?)?.toDouble() ?? 0.0;
-                        final barcode = (d['barcode'] ?? '').toString();
-
-                        return ListTile(
-                          dense: true,
-                          title: Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            '₱ ${price.toStringAsFixed(2)}'
-                            '${barcode.isNotEmpty ? ' • $barcode' : ''}',
-                          ),
-                          onTap: () => _addFromDoc(doc),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Transaction',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _cart.isEmpty
-                      ? 'Scan/Add Item to transact…'
-                      : 'Items in your transaction:',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: _cart.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No items scanned yet',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.black54,
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: EdgeInsets.zero,
-                          itemCount: _cart.length,
-                          itemBuilder: (context, index) {
-                            final item = _cart[index];
-
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 6,
-                                horizontal: 4,
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '${item.name}  x${item.qty}',
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  Text('₱ ${item.total.toStringAsFixed(2)}'),
-                                  const SizedBox(width: 6),
-                                  InkWell(
-                                    borderRadius: BorderRadius.circular(999),
-                                    onTap: () => _removeCartItem(index),
-                                    child: const Padding(
-                                      padding: EdgeInsets.all(4),
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 18,
-                                        color: Colors.redAccent,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                if (_cart.isNotEmpty) ...[
-                  const Divider(),
-                  _summaryRow(
-                    'Sub Total',
-                    '₱ ${summary.subtotal.toStringAsFixed(2)}',
-                  ),
-                  if (_taxEnabled) ...[
-                    const SizedBox(height: 4),
-                    _summaryRow(
-                      taxLabel,
-                      '₱ ${summary.taxAmount.toStringAsFixed(2)}',
-                    ),
-                  ],
-                  const Divider(),
-                  _summaryRow(
-                    'Grand Total',
-                    '₱ ${summary.total.toStringAsFixed(2)}',
-                    bold: true,
-                    valueColor: Colors.green,
-                  ),
-                ],
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00A88B),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed:
-                        (_cart.isEmpty || _loadingAdd || _processingCheckout)
-                            ? null
-                            : _startCheckout,
-                    child: _processingCheckout
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            'TRANSACT',
-                            style: TextStyle(
-                              letterSpacing: 1,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

@@ -2,9 +2,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
+
+import '../transaction/transaction_screen.dart';
+import '../Notifications/notifications_screen.dart';
 
 enum DashboardFilter {
   thisWeek,
@@ -146,6 +149,22 @@ class DashboardReportData {
   });
 }
 
+class DashboardLowStockItem {
+  final String id;
+  final String name;
+  final String category;
+  final int stockQty;
+  final String barcode;
+
+  const DashboardLowStockItem({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.stockQty,
+    required this.barcode,
+  });
+}
+
 class _TaxBucket {
   final String taxName;
   final double taxRate;
@@ -219,7 +238,12 @@ class _DailyBucket {
 }
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final ValueChanged<int>? onNavigateToTab;
+
+  const DashboardScreen({
+    super.key,
+    this.onNavigateToTab,
+  });
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -227,6 +251,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   static const bool allowYearly = false;
+  static const int lowStockThreshold = 5;
 
   late final Future<DashboardStoreContext> _storeFuture;
   DashboardFilter _selectedFilter = DashboardFilter.thisWeek;
@@ -411,6 +436,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _goToTab(int index) {
+    final callback = widget.onNavigateToTab;
+    if (callback != null) {
+      callback(index);
+    }
+  }
+
+  void _openTransactionScreen(DashboardStoreContext store) {
+    if (widget.onNavigateToTab != null) {
+      _goToTab(2);
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TransactionScreen(
+          storeId: store.storeId,
+          storeName: store.storeName,
+          isActive: true,
+        ),
+      ),
+    );
+  }
+
   int _sumProducts(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     int total = 0;
 
@@ -468,6 +518,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
     }
+
+    return items;
+  }
+
+  int _currentStockFromItem(Map<String, dynamic> data) {
+    if (data['stockQty'] != null) return _safeToInt(data['stockQty']);
+    if (data['stock'] != null) return _safeToInt(data['stock']);
+    if (data['quantity'] != null) return _safeToInt(data['quantity']);
+    return 0;
+  }
+
+  List<DashboardLowStockItem> _buildLowStockItems(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final items = <DashboardLowStockItem>[];
+
+    for (final doc in docs) {
+      final data = doc.data();
+      final trackStock = (data['trackStock'] as bool?) ?? true;
+      if (!trackStock) continue;
+
+      final stockQty = _currentStockFromItem(data);
+      if (stockQty > lowStockThreshold) continue;
+
+      items.add(
+        DashboardLowStockItem(
+          id: doc.id,
+          name: (data['name'] ?? 'Unnamed Item').toString(),
+          category: (data['category'] ?? 'Uncategorized').toString(),
+          stockQty: stockQty,
+          barcode: (data['barcode'] ?? '').toString(),
+        ),
+      );
+    }
+
+    items.sort((a, b) {
+      final stockCompare = a.stockQty.compareTo(b.stockQty);
+      if (stockCompare != 0) return stockCompare;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
 
     return items;
   }
@@ -995,6 +1085,270 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Color _stockColor(int qty) {
+    if (qty <= 0) return Colors.redAccent;
+    if (qty <= 2) return Colors.orange;
+    if (qty <= lowStockThreshold) return const Color(0xFFB36A00);
+    return const Color(0xFF0E6C73);
+  }
+
+  String _stockLabel(int qty) {
+    if (qty <= 0) return 'Out';
+    if (qty <= 2) return '$qty left';
+    if (qty <= lowStockThreshold) return '$qty left';
+    return 'In stock';
+  }
+
+  void _showLowStockSheet(List<DashboardLowStockItem> lowStockItems) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.72,
+          decoration: const BoxDecoration(
+            color: Color(0xFFF6FBFA),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 54,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.redAccent,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Low Stock Details',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0E6C73),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${lowStockItems.length} item${lowStockItems.length == 1 ? '' : 's'}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Items with stock less than or equal to $lowStockThreshold.',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: lowStockItems.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No low-stock items right now.',
+                            style: TextStyle(color: Colors.black54),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                          itemCount: lowStockItems.length,
+                          itemBuilder: (context, index) {
+                            return _buildLowStockTile(
+                              lowStockItems[index],
+                              showBarcode: true,
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openNotificationsScreen(
+    DashboardStoreContext store,
+    List<DashboardLowStockItem> lowStockItems,
+  ) {
+    final alerts = lowStockItems.map((item) {
+      final isOut = item.stockQty <= 0;
+      final isCritical = item.stockQty > 0 && item.stockQty <= 2;
+
+      return {
+        'title': isOut ? 'Out of stock' : 'Low stock alert',
+        'message': '${item.name} • ${item.category}',
+        'trailing': isOut ? 'Out' : '${item.stockQty} left',
+        'severity': isOut ? 'out' : (isCritical ? 'critical' : 'warning'),
+      };
+    }).toList();
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotificationsScreen(
+          storeName: store.storeName,
+          alerts: alerts,
+        ),
+      ),
+    );
+  }
+
+  void _showNotificationSheet(List<DashboardLowStockItem> lowStockItems) {
+    final notifications = <Map<String, dynamic>>[];
+
+    for (final item in lowStockItems) {
+      final color = _stockColor(item.stockQty);
+
+      notifications.add({
+        'title': item.stockQty <= 0 ? 'Out of stock' : 'Low stock alert',
+        'message': '${item.name} • ${item.category}',
+        'trailing': item.stockQty <= 0 ? 'Out' : '${item.stockQty} left',
+        'color': color,
+      });
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 54,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons.notifications_active_outlined,
+                        color: Color(0xFF0E6C73),
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'Notifications',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0E6C73),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (notifications.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 18),
+                      child: Text(
+                        'No notifications right now.',
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    )
+                  else
+                    ...notifications.map((note) {
+                      final Color color = note['color'] as Color;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.20),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              color == Colors.redAccent
+                                  ? Icons.error_outline_rounded
+                                  : Icons.warning_amber_rounded,
+                              color: color,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    note['title'] as String,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    note['message'] as String,
+                                    style: const TextStyle(
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              note['trailing'] as String,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: color,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSummaryGraph(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
     DashboardRange range,
@@ -1023,7 +1377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Sales',
+            'Sales Overview',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -1122,7 +1476,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.75),
+          color: Colors.white.withValues(alpha: 0.75),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -1166,61 +1520,314 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }).toList();
   }
 
+  Widget _headerActionButton({
+    required Widget child,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 1.5,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Center(child: child),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNotificationBell(
+    DashboardStoreContext store,
+    List<DashboardLowStockItem> lowStockItems,
+  ) {
+    final unreadCount = lowStockItems.length;
+
+    return _headerActionButton(
+      onTap: () => _openNotificationsScreen(store, lowStockItems),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(
+            Icons.notifications_none_rounded,
+            color: Colors.black87,
+          ),
+          if (unreadCount > 0)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 5,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                constraints: const BoxConstraints(minWidth: 18),
+                child: Text(
+                  unreadCount > 9 ? '9+' : '$unreadCount',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrimarySalesCard(
+    DashboardReportData report,
+    DashboardRange range,
+    DashboardStoreContext store,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  range.title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _money(report.totalSales),
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  range.subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: () => _openTransactionScreen(store),
+            icon: const Icon(Icons.point_of_sale_rounded),
+            label: const Text('Transact'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0E6C73),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLowStockTile(
+    DashboardLowStockItem item, {
+    bool showBarcode = false,
+  }) {
+    final badgeColor = _stockColor(item.stockQty);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.80),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: badgeColor.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              item.stockQty <= 0
+                  ? Icons.error_outline_rounded
+                  : Icons.warning_amber_rounded,
+              color: badgeColor,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  item.category,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.black54,
+                  ),
+                ),
+                if (showBarcode && item.barcode.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Barcode: ${item.barcode}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.black45,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 8,
+            ),
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _stockLabel(item.stockQty),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: badgeColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle({
+    required String title,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0E6C73),
+            ),
+          ),
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final range = _currentRange();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFD47F82),
-      body: SafeArea(
-        child: FutureBuilder<DashboardStoreContext>(
-          future: _storeFuture,
-          builder: (context, storeSnap) {
-            if (storeSnap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      backgroundColor: const Color(0xFFE6F7F5),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFE6F7F5),
+              Color(0xFFD5F0EC),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: FutureBuilder<DashboardStoreContext>(
+            future: _storeFuture,
+            builder: (context, storeSnap) {
+              if (storeSnap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-            if (storeSnap.hasError || !storeSnap.hasData) {
-              return Center(
-                child: Text(
-                  'Failed to load dashboard.\n${storeSnap.error ?? ''}',
-                  textAlign: TextAlign.center,
-                ),
-              );
-            }
-
-            final store = storeSnap.data!;
-
-            final txStream = FirebaseFirestore.instance
-                .collection('stores')
-                .doc(store.storeId)
-                .collection('transactions')
-                .where(
-                  'createdAt',
-                  isGreaterThanOrEqualTo: Timestamp.fromDate(range.start),
-                )
-                .where(
-                  'createdAt',
-                  isLessThan: Timestamp.fromDate(range.end),
-                )
-                .orderBy('createdAt', descending: true)
-                .snapshots();
-
-            return Center(
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color(0xFFE6F7F5),
-                      Color(0xFFD5F0EC),
-                    ],
+              if (storeSnap.hasError || !storeSnap.hasData) {
+                return Center(
+                  child: Text(
+                    'Failed to load dashboard.\n${storeSnap.error ?? ''}',
+                    textAlign: TextAlign.center,
                   ),
-                ),
+                );
+              }
+
+              final store = storeSnap.data!;
+
+              final txStream = FirebaseFirestore.instance
+                  .collection('stores')
+                  .doc(store.storeId)
+                  .collection('transactions')
+                  .where(
+                    'createdAt',
+                    isGreaterThanOrEqualTo: Timestamp.fromDate(range.start),
+                  )
+                  .where(
+                    'createdAt',
+                    isLessThan: Timestamp.fromDate(range.end),
+                  )
+                  .orderBy('createdAt', descending: true)
+                  .snapshots();
+
+              final itemsStream = FirebaseFirestore.instance
+                  .collection('stores')
+                  .doc(store.storeId)
+                  .collection('items')
+                  .snapshots();
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: txStream,
                   builder: (context, txSnap) {
@@ -1244,255 +1851,231 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       docs: docs,
                     );
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: itemsStream,
+                      builder: (context, itemSnap) {
+                        if (itemSnap.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+
+                        if (itemSnap.hasError) {
+                          return Center(
+                            child: Text(
+                              'Failed to load inventory alerts.\n${itemSnap.error}',
+                              textAlign: TextAlign.center,
+                            ),
+                          );
+                        }
+
+                        final itemDocs = itemSnap.data?.docs ?? [];
+                        final lowStockItems = _buildLowStockItems(itemDocs);
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.storefront,
-                                color: Color(0xFFB12A87),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                store.storeName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () {},
-                              icon: const Icon(Icons.search),
-                            ),
-                            PopupMenuButton<DashboardExportAction>(
-                              tooltip: 'Export summary',
-                              icon: const Icon(Icons.more_vert),
-                              onSelected: (value) async {
-                                await _handleExport(value, report);
-                              },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: DashboardExportAction.pdf,
-                                  child: Text('Create PDF Summary'),
-                                ),
-                                PopupMenuItem(
-                                  value: DashboardExportAction.csv,
-                                  child: Text('Copy CSV Summary'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            Row(
                               children: [
-                                const Text(
-                                  'Your Dashboard',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
                                 Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.9),
-                                    borderRadius: BorderRadius.circular(16),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.06),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
+                                  width: 44,
+                                  height: 44,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              range.title,
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              _money(report.totalSales),
-                                              style: const TextStyle(
-                                                fontSize: 30,
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              range.subtitle,
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.black54,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Container(
-                                        width: 44,
-                                        height: 44,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.white,
-                                          shape: BoxShape.circle,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black12,
-                                              blurRadius: 6,
-                                              offset: Offset(0, 2),
-                                            ),
-                                          ],
-                                        ),
-                                        child: const Icon(Icons.add, size: 28),
-                                      ),
-                                    ],
+                                  child: const Icon(
+                                    Icons.storefront,
+                                    color: Color(0xFFB12A87),
                                   ),
                                 ),
-                                const SizedBox(height: 14),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _statCard(
-                                        title: 'Total Product Sold',
-                                        value: '${report.totalProductsSold}',
-                                        smallNote: report.transactionCount > 0
-                                            ? 'Updated live'
-                                            : 'No sales yet',
-                                      ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    store.storeName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
                                     ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: _statCard(
-                                        title: 'Transactions',
-                                        value: '${report.transactionCount}',
-                                        smallNote: 'For selected period',
-                                      ),
+                                  ),
+                                ),
+                                _buildNotificationBell(store, lowStockItems),
+                                const SizedBox(width: 8),
+                                PopupMenuButton<DashboardExportAction>(
+                                  tooltip: 'Export summary',
+                                  icon: const Icon(Icons.more_vert),
+                                  onSelected: (value) async {
+                                    await _handleExport(value, report);
+                                  },
+                                  itemBuilder: (context) => const [
+                                    PopupMenuItem(
+                                      value: DashboardExportAction.pdf,
+                                      child: Text('Create PDF Summary'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: DashboardExportAction.csv,
+                                      child: Text('Copy CSV Summary'),
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 18),
-                                Row(
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Expanded(
-                                      child: Text(
-                                        'Summary Reports',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w800,
-                                          color: Color(0xFF0E6C73),
-                                        ),
+                                    const Text(
+                                      'Your Dashboard',
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w800,
                                       ),
                                     ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(10),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color:
-                                                Colors.black.withOpacity(0.08),
-                                            blurRadius: 6,
-                                            offset: const Offset(0, 2),
+                                    const SizedBox(height: 12),
+                                    _buildPrimarySalesCard(report, range, store),
+                                    const SizedBox(height: 14),
+                                    IntrinsicHeight(
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Expanded(
+                                            child: _statCard(
+                                              title: 'Total Product Sold',
+                                              value:
+                                                  '${report.totalProductsSold}',
+                                              smallNote:
+                                                  report.transactionCount > 0
+                                                      ? 'Updated live'
+                                                      : 'No sales yet',
+                                              icon:
+                                                  Icons.shopping_bag_outlined,
+                                              iconColor:
+                                                  const Color(0xFF0E6C73),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: _statCard(
+                                              title: 'Low Stock Items',
+                                              value: '${lowStockItems.length}',
+                                              smallNote: 'Tap to open alerts',
+                                              icon:
+                                                  Icons.warning_amber_rounded,
+                                              iconColor: Colors.redAccent,
+                                              onTap: () =>
+                                                  _openNotificationsScreen(
+                                                store,
+                                                lowStockItems,
+                                              ),
+                                            ),
                                           ),
                                         ],
                                       ),
-                                      child: DropdownButtonHideUnderline(
-                                        child: DropdownButton<DashboardFilter>(
-                                          value: _selectedFilter,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          items: _filterItems(),
-                                          onChanged: (value) {
-                                            if (value == null) return;
-                                            setState(
-                                                () => _selectedFilter = value);
-                                          },
+                                    ),
+                                    const SizedBox(height: 18),
+                                    Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            'Summary Reports',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF0E6C73),
+                                            ),
+                                          ),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(
+                                                  alpha: 0.08,
+                                                ),
+                                                blurRadius: 6,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: DropdownButtonHideUnderline(
+                                            child:
+                                                DropdownButton<DashboardFilter>(
+                                              value: _selectedFilter,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              items: _filterItems(),
+                                              onChanged: (value) {
+                                                if (value == null) return;
+                                                setState(
+                                                  () => _selectedFilter = value,
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    _buildSummaryGraph(docs, range),
+                                    if (!allowYearly) ...[
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Yearly view is disabled for now to avoid loading too many transaction records.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
                                         ),
                                       ),
+                                    ],
+                                    const SizedBox(height: 14),
+                                    _summaryInfoCard(report),
+                                    const SizedBox(height: 14),
+                                    _buildSectionTitle(
+                                      title: 'Recent Transactions',
                                     ),
+                                    const SizedBox(height: 10),
+                                    if (docs.isEmpty)
+                                      const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            vertical: 24,
+                                          ),
+                                          child: Text(
+                                            'No sales found for this selected period.',
+                                            style: TextStyle(
+                                              color: Colors.black54,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      ..._buildRecentTransactions(docs),
                                   ],
                                 ),
-                                const SizedBox(height: 12),
-                                _buildSummaryGraph(docs, range),
-                                if (!allowYearly) ...[
-                                  const SizedBox(height: 8),
-                                  const Text(
-                                    'Yearly view is disabled for now to avoid loading too many transaction records.',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.black54,
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 14),
-                                _summaryInfoCard(report),
-                                const SizedBox(height: 14),
-                                if (docs.isEmpty)
-                                  const Center(
-                                    child: Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 24),
-                                      child: Text(
-                                        'No sales found for this selected period.',
-                                        style: TextStyle(color: Colors.black54),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  )
-                                else ...[
-                                  const Text(
-                                    'Recent Transactions',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF0E6C73),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  ..._buildRecentTransactions(docs),
-                                ],
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     );
                   },
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -1503,11 +2086,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.88),
+        color: Colors.white.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 6,
             offset: const Offset(0, 3),
           ),
@@ -1530,6 +2113,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _quickRow('Tax Collected', _money(report.taxCollected)),
           _quickRow('Cash Sales', _money(report.cashSales)),
           _quickRow('GCash Sales', _money(report.gcashSales)),
+          _quickRow('Transactions', '${report.transactionCount}'),
         ],
       ),
     );
@@ -1555,8 +2139,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String title,
     required String value,
     required String smallNote,
+    IconData? icon,
+    Color? iconColor,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final child = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.88),
@@ -1572,7 +2159,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 13)),
+          if (icon != null) ...[
+            Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: iconColor ?? const Color(0xFF0E6C73),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ] else
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
           const SizedBox(height: 8),
           Text(
             value,
@@ -1581,15 +2193,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 6),
+          const Spacer(),
           Text(
             smallNote,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 11,
               color: Colors.black54,
             ),
           ),
         ],
+      ),
+    );
+
+    if (onTap == null) return child;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: child,
       ),
     );
   }

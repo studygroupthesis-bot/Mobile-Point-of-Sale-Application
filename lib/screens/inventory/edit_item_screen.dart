@@ -199,6 +199,15 @@ class _EditItemScreenState extends State<EditItemScreen> {
     return storeId;
   }
 
+  String _normalizeBarcodeValue(dynamic value) {
+    if (value == null) return '';
+    var text = value.toString().trim().replaceAll(RegExp(r'\s+'), '');
+    if (text.endsWith('.0')) {
+      text = text.substring(0, text.length - 2);
+    }
+    return text;
+  }
+
   Future<void> _refreshItemData() async {
     try {
       final storeId = _storeId ?? await _requireStoreId();
@@ -333,18 +342,6 @@ class _EditItemScreenState extends State<EditItemScreen> {
     return null;
   }
 
-  String? _validateWholeNumber(String? value, String field) {
-    if (value == null || value.trim().isEmpty) return '$field is required';
-    final n = int.tryParse(value.trim());
-    if (n == null) return 'Enter a whole number';
-    if (n < 0) return '$field cannot be negative';
-    return null;
-  }
-
-  String _normalizeBarcode(String value) {
-    return value.trim();
-  }
-
   Future<void> _scanBarcodeIntoField() async {
     if (saving) return;
 
@@ -356,7 +353,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
     if (!mounted || code == null) return;
 
-    final normalized = _normalizeBarcode(code);
+    final normalized = _normalizeBarcodeValue(code);
     if (normalized.isEmpty) return;
 
     setState(() {
@@ -373,20 +370,37 @@ class _EditItemScreenState extends State<EditItemScreen> {
     required String barcodeValue,
     required String ignoreItemId,
   }) async {
-    if (barcodeValue.isEmpty) return false;
+    final normalized = _normalizeBarcodeValue(barcodeValue);
+    if (normalized.isEmpty) return false;
 
-    final snap = await FirebaseFirestore.instance
+    final itemsRef = FirebaseFirestore.instance
         .collection('stores')
         .doc(storeId)
-        .collection('items')
-        .where('barcode', isEqualTo: barcodeValue)
+        .collection('items');
+
+    final exact = await itemsRef
+        .where('barcode', isEqualTo: normalized)
         .limit(10)
         .get();
 
-    for (final doc in snap.docs) {
-      if (doc.id != ignoreItemId) {
-        return true;
-      }
+    for (final doc in exact.docs) {
+      if (doc.id != ignoreItemId) return true;
+    }
+
+    final exactNormalized = await itemsRef
+        .where('barcodeNormalized', isEqualTo: normalized)
+        .limit(10)
+        .get();
+
+    for (final doc in exactNormalized.docs) {
+      if (doc.id != ignoreItemId) return true;
+    }
+
+    final all = await itemsRef.get();
+    for (final doc in all.docs) {
+      if (doc.id == ignoreItemId) continue;
+      final saved = _normalizeBarcodeValue(doc.data()['barcode']);
+      if (saved == normalized) return true;
     }
 
     return false;
@@ -406,7 +420,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
 
     try {
       final storeId = _storeId ?? await _requireStoreId();
-      final barcodeValue = _normalizeBarcode(barcode.text);
+      final barcodeValue = _normalizeBarcodeValue(barcode.text);
 
       if (barcodeValue.isNotEmpty) {
         final exists = await _barcodeExistsInStore(
@@ -435,14 +449,16 @@ class _EditItemScreenState extends State<EditItemScreen> {
         'price': double.tryParse(price.text.trim()) ?? 0,
         'cost': double.tryParse(cost.text.trim()) ?? 0,
         'barcode': barcodeValue,
+        'barcodeNormalized': barcodeValue,
         'soldBy': soldBy == SoldBy.each ? 'each' : 'weight',
         'trackStock': true,
         'stockQty': int.tryParse(stockQty.text.trim()) ?? 0,
+        'stock': int.tryParse(stockQty.text.trim()) ?? 0,
+        'quantity': int.tryParse(stockQty.text.trim()) ?? 0,
         'representationType':
             representation == RepresentationType.color ? 'color' : 'image',
-        'colorValue': representation == RepresentationType.color
-            ? selectedColor.toARGB32()
-            : null,
+        'colorValue':
+            representation == RepresentationType.color ? selectedColor.value : null,
         'updated_at': FieldValue.serverTimestamp(),
       };
 
@@ -466,7 +482,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
       _setCategory(category.text);
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -509,7 +525,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
           .delete();
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -644,7 +660,7 @@ class _EditItemScreenState extends State<EditItemScreen> {
                     children: colors.map((color) {
                       final isSelected =
                           representation == RepresentationType.color &&
-                              selectedColor.toARGB32() == color.toARGB32();
+                              selectedColor.value == color.value;
 
                       return GestureDetector(
                         onTap: () {
@@ -980,49 +996,148 @@ class _EditItemScreenState extends State<EditItemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text("Edit Item"),
+        title: const Text('Edit Item'),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: Colors.black87,
         actions: [
           IconButton(
             icon: const Icon(Icons.delete, color: Colors.red),
-            onPressed: deleteItem,
+            onPressed: saving ? null : deleteItem,
           ),
         ],
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                const SizedBox(height: 8),
-                Center(child: _buildPreviewCircle()),
-                const SizedBox(height: 28),
-                _buildLabel('Product Name'),
-                TextFormField(
-                  controller: name,
-                  decoration: _fieldDecoration(
-                    hintText: 'Product Name',
-                    suffixIcon: const Icon(Icons.edit_outlined, size: 18),
-                  ),
-                  validator: (v) => _validateRequired(v, 'Product Name'),
-                ),
-                const SizedBox(height: 14),
-                _buildCategoryField(),
-                const SizedBox(height: 14),
-                _buildLabel('Sold by'),
-                Row(
-                  children: [
-                    _buildSoldByOption(label: 'Each', value: SoldBy.each),
-                    const SizedBox(width: 34),
-                    _buildSoldByOption(label: 'Weight', value: SoldBy.weight),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFFFFE5EE),
+                    Color(0xFFE9FFF7),
                   ],
                 ),
-              ]
+              ),
             ),
           ),
-        ),
+          SafeArea(
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: [
+                  const SizedBox(height: 8),
+                  Center(child: _buildPreviewCircle()),
+                  const SizedBox(height: 28),
+
+                  _buildLabel('Product Name'),
+                  TextFormField(
+                    controller: name,
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: 'Product Name',
+                      suffixIcon: const Icon(Icons.edit_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateRequired(v, 'Product Name'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildCategoryField(),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Price'),
+                  TextFormField(
+                    controller: price,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: '0.00',
+                      suffixIcon: const Icon(Icons.payments_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateMoney(v, 'Price'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Cost'),
+                  TextFormField(
+                    controller: cost,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textInputAction: TextInputAction.next,
+                    decoration: _fieldDecoration(
+                      hintText: '0.00',
+                      suffixIcon:
+                          const Icon(Icons.receipt_long_outlined, size: 18),
+                    ),
+                    validator: (v) => _validateMoney(v, 'Cost'),
+                  ),
+
+                  const SizedBox(height: 14),
+                  _buildBarcodeField(),
+
+                  const SizedBox(height: 14),
+                  _buildLabel('Sold by'),
+                  Row(
+                    children: [
+                      _buildSoldByOption(label: 'Each', value: SoldBy.each),
+                      const SizedBox(width: 34),
+                      _buildSoldByOption(
+                        label: 'Weight',
+                        value: SoldBy.weight,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+                  _buildStockActionSection(),
+
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: saving ? null : updateItem,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _teal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'SAVE CHANGES',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -2,6 +2,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../firebase/stock_movement_auth.dart';
+import '../transaction/transaction_screen.dart';
+
+enum InventoryMenuAction {
+  stockLogs,
+  createItem,
+  editItem,
+  inventoryOverview,
+  batchDetails,
+  addStock,
+  reduceStock,
+  pullOutStock,
+}
+
 class StaffInventoryScreen extends StatefulWidget {
   const StaffInventoryScreen({super.key});
 
@@ -11,20 +25,19 @@ class StaffInventoryScreen extends StatefulWidget {
 
 class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   final TextEditingController _searchController = TextEditingController();
-
-  String _selectedCategory = 'All';
-  String _search = '';
-
-  /// itemId -> qty
-  final Map<String, int> _cart = {};
+  final StockMovementService _movementService = StockMovementService();
 
   late final Future<_StaffStoreAccess> _storeAccessFuture;
 
-  // Basket + bottom nav reserved layout values
-  static const double _basketHeight = 56;
-  static const double _basketBottomOffset = 56;
+  final Map<String, int> _cart = {};
+
+  String _search = '';
+  String _selectedCategory = 'All';
+
+  static const double _basketHeight = 48;
+  static const double _basketBottomOffset = 4;
   static const double _reservedBottomSpace =
-      _basketHeight + _basketBottomOffset + 14;
+      _basketHeight + _basketBottomOffset + 10;
 
   @override
   void initState() {
@@ -36,6 +49,33 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  bool _isAdminLikeRole(String role) {
+    final normalized = role.trim().toLowerCase();
+    return normalized == 'admin' || normalized == 'owner';
+  }
+
+  Map<String, dynamic> _asStringMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
+    return <String, dynamic>{};
+  }
+
+  bool _readPermissionFromMaps(
+    List<Map<String, dynamic>> maps,
+    List<String> possibleKeys,
+    bool fallback,
+  ) {
+    for (final map in maps) {
+      for (final key in possibleKeys) {
+        final value = map[key];
+        if (value is bool) return value;
+      }
+    }
+    return fallback;
   }
 
   Future<_StaffStoreAccess> _loadStoreAccess() async {
@@ -53,7 +93,8 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
       throw Exception('User profile not found.');
     }
 
-    final userData = userSnap.data() ?? {};
+    final userData = userSnap.data() ?? <String, dynamic>{};
+
     final storeId = (userData['storeId'] ?? '').toString().trim();
     final role = (userData['role'] ?? '').toString().trim().toLowerCase();
 
@@ -69,12 +110,70 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
       );
     }
 
+    final permissionsRoot = _asStringMap(userData['permissions']);
+    final inventoryPermissions = _asStringMap(permissionsRoot['inventory']);
+
+    final isAdmin = _isAdminLikeRole(role);
+
+    final canViewInventory = isAdmin
+        ? true
+        : _readPermissionFromMaps(
+            [inventoryPermissions, permissionsRoot, userData],
+            [
+              'viewInventory',
+              'canViewInventory',
+              'view_inventory',
+              'can_view_inventory',
+            ],
+            true,
+          );
+
+    final canAddStock = isAdmin
+        ? true
+        : _readPermissionFromMaps(
+            [inventoryPermissions, permissionsRoot, userData],
+            [
+              'addStock',
+              'canAddStock',
+              'add_stock',
+              'can_add_stock',
+            ],
+            false,
+          );
+
+    final canReduceStock = isAdmin
+        ? true
+        : _readPermissionFromMaps(
+            [inventoryPermissions, permissionsRoot, userData],
+            [
+              'reduceStock',
+              'canReduceStock',
+              'reduce_stock',
+              'can_reduce_stock',
+            ],
+            false,
+          );
+
+    final canPullOutStock = isAdmin
+        ? true
+        : _readPermissionFromMaps(
+            [inventoryPermissions, permissionsRoot, userData],
+            [
+              'pullOutStock',
+              'canPullOutStock',
+              'pull_out_stock',
+              'can_pull_out_stock',
+            ],
+            false,
+          );
+
     final storeSnap = await FirebaseFirestore.instance
         .collection('stores')
         .doc(storeId)
         .get();
 
-    final storeData = storeSnap.data() ?? {};
+    final storeData = storeSnap.data() ?? <String, dynamic>{};
+
     final storeName =
         (storeData['business_name'] ?? storeData['storeName'] ?? 'Store')
             .toString()
@@ -82,6 +181,7 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
 
     final storeLogoUrl = (storeData['logoUrl'] ??
             storeData['storeLogoUrl'] ??
+            storeData['logo_url'] ??
             storeData['imageUrl'] ??
             '')
         .toString()
@@ -92,10 +192,18 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
       storeName: storeName.isEmpty ? 'Store' : storeName,
       role: role,
       storeLogoUrl: storeLogoUrl,
+      canViewInventory: canViewInventory,
+      canAddStock: canAddStock,
+      canReduceStock: canReduceStock,
+      canPullOutStock: canPullOutStock,
     );
   }
 
   int _qtyOf(String itemId) => _cart[itemId] ?? 0;
+
+  int get _totalItems => _cart.values.fold(0, (sum, qty) => sum + qty);
+
+  String _peso(num value) => '₱${value.toStringAsFixed(2)}';
 
   void _addToCart(InventoryItem item) {
     setState(() {
@@ -118,18 +226,28 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
     });
   }
 
-  int get _totalItems => _cart.values.fold(0, (sum, qty) => sum + qty);
-
   double _totalAmount(List<InventoryItem> items) {
     double total = 0;
     for (final item in items) {
-      final qty = _cart[item.id] ?? 0;
-      total += item.price * qty;
+      total += item.price * (_cart[item.id] ?? 0);
     }
     return total;
   }
 
-  String _peso(num value) => '₱${value.toStringAsFixed(2)}';
+  List<CartItem> _buildTransactionCartItems(List<InventoryItem> items) {
+    return items
+        .where((item) => (_cart[item.id] ?? 0) > 0)
+        .map(
+          (item) => CartItem(
+            itemId: item.id,
+            name: item.name,
+            price: item.price,
+            barcode: item.barcode,
+            qty: _cart[item.id] ?? 0,
+          ),
+        )
+        .toList();
+  }
 
   Map<String, List<InventoryItem>> _buildSections(List<InventoryItem> items) {
     final Map<String, List<InventoryItem>> grouped = {};
@@ -148,50 +266,333 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
     }
 
     if (_selectedCategory == 'All') {
-      final sortedKeys = grouped.keys.toList()
+      final keys = grouped.keys.toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
       return {
-        for (final key in sortedKeys) key: grouped[key]!,
+        for (final key in keys) key: grouped[key]!,
       };
     }
 
-    final selected = grouped.entries.where(
-      (e) => e.key.toLowerCase() == _selectedCategory.toLowerCase(),
+    final filtered = grouped.entries.where(
+      (entry) => entry.key.toLowerCase() == _selectedCategory.toLowerCase(),
     );
 
     return {
-      for (final entry in selected) entry.key: entry.value,
+      for (final entry in filtered) entry.key: entry.value,
     };
   }
 
-  void _showMenuMessage(String message) {
+  void _showMessage(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _handleMenuAction(String value, _StaffStoreAccess access) {
-    final canManageInventory =
-        access.role == 'admin' || access.role == 'staff';
+  String _movementTitle(InventoryMovementType type) {
+    switch (type) {
+      case InventoryMovementType.addStock:
+        return 'Add Stock';
+      case InventoryMovementType.reduceStock:
+        return 'Reduce Stock';
+      case InventoryMovementType.pullOutStock:
+        return 'Pull Out Stock';
+    }
+  }
 
-    if (!canManageInventory) {
-      _showMenuMessage('You do not have permission to manage inventory.');
+  List<PopupMenuEntry<InventoryMenuAction>> _buildInventoryMenuItems(
+    _StaffStoreAccess access,
+  ) {
+    if (access.isAdminLike) {
+      return const [
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.stockLogs,
+          child: Text('Stock Logs'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.createItem,
+          child: Text('Create Item'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.editItem,
+          child: Text('Edit Item'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.inventoryOverview,
+          child: Text('Inventory Overview'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.batchDetails,
+          child: Text('Batch Details'),
+        ),
+      ];
+    }
+
+    final items = <PopupMenuEntry<InventoryMenuAction>>[];
+
+    if (access.canAddStock) {
+      items.add(
+        const PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.addStock,
+          child: Text('Add Stock'),
+        ),
+      );
+    }
+
+    if (access.canReduceStock) {
+      items.add(
+        const PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.reduceStock,
+          child: Text('Reduce Stock'),
+        ),
+      );
+    }
+
+    if (access.canPullOutStock) {
+      items.add(
+        const PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.pullOutStock,
+          child: Text('Pull Out Stock'),
+        ),
+      );
+    }
+
+    if (items.isEmpty) {
+      items.add(
+        const PopupMenuItem<InventoryMenuAction>(
+          enabled: false,
+          child: Text('No actions available'),
+        ),
+      );
+    }
+
+    return items;
+  }
+
+  Future<void> _openMovementItemPicker({
+    required InventoryMovementType type,
+    required List<InventoryItem> allItems,
+  }) async {
+    final stockManagedItems = allItems.where((item) => item.trackStock).toList();
+
+    if (stockManagedItems.isEmpty) {
+      _showMessage('No stock-managed items available.');
       return;
     }
 
-    switch (value) {
-      case 'add':
-        _showMenuMessage('Add Item clicked.');
+    final selectedItem = await showModalBottomSheet<InventoryItem>(
+      context: context,
+      backgroundColor: Colors.white,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          top: false,
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            itemCount: stockManagedItems.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final item = stockManagedItems[index];
+              return ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                tileColor: const Color(0xFFF4F7F7),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                leading: _ProductThumb(
+                  item: item,
+                  size: 48,
+                  radius: 10,
+                ),
+                title: Text(
+                  item.name,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text('Current stock: ${item.stockQty ?? 0}'),
+                onTap: () => Navigator.pop(context, item),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    if (selectedItem == null) return;
+
+    await _openMovementEntryDialog(type: type, item: selectedItem);
+  }
+
+  Future<void> _openMovementEntryDialog({
+    required InventoryMovementType type,
+    required InventoryItem item,
+  }) async {
+    final qtyCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        bool isSaving = false;
+        String? errorText;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> submit() async {
+              final qty = int.tryParse(qtyCtrl.text.trim());
+
+              if (qty == null || qty <= 0) {
+                setDialogState(() {
+                  errorText = 'Enter a valid quantity.';
+                });
+                return;
+              }
+
+              setDialogState(() {
+                isSaving = true;
+                errorText = null;
+              });
+
+              try {
+                final access = await _storeAccessFuture;
+
+                await _movementService.applyMovement(
+                  storeId: access.storeId,
+                  type: type,
+                  itemId: item.id,
+                  itemName: item.name,
+                  quantity: qty,
+                  note: noteCtrl.text.trim(),
+                );
+
+                if (!mounted) return;
+
+                Navigator.of(dialogContext).pop();
+                _showMessage('${_movementTitle(type)} saved for ${item.name}.');
+              } catch (e) {
+                setDialogState(() {
+                  isSaving = false;
+                  errorText = e.toString();
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text(_movementTitle(type)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Current stock: ${item.stockQty ?? 0}',
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: qtyCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Note (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        errorText!,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed:
+                      isSaving ? null : () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isSaving ? null : submit,
+                  child: Text(isSaving ? 'Saving...' : 'Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    qtyCtrl.dispose();
+    noteCtrl.dispose();
+  }
+
+  void _handleMenuAction(
+    InventoryMenuAction action,
+    _StaffStoreAccess access,
+    List<InventoryItem> allItems,
+  ) {
+    if (!access.shouldShowMenu) {
+      _showMessage('You do not have permission to manage inventory.');
+      return;
+    }
+
+    switch (action) {
+      case InventoryMenuAction.stockLogs:
+        _showMessage('Stock Logs clicked.');
         break;
-      case 'edit':
-        _showMenuMessage('Edit Item clicked.');
+      case InventoryMenuAction.createItem:
+        _showMessage('Create Item clicked.');
         break;
-      case 'delete':
-        _showMenuMessage('Delete Item clicked.');
+      case InventoryMenuAction.editItem:
+        _showMessage('Edit Item clicked.');
+        break;
+      case InventoryMenuAction.inventoryOverview:
+        _showMessage('Inventory Overview clicked.');
+        break;
+      case InventoryMenuAction.batchDetails:
+        _showMessage('Batch Details clicked.');
+        break;
+      case InventoryMenuAction.addStock:
+        _openMovementItemPicker(
+          type: InventoryMovementType.addStock,
+          allItems: allItems,
+        );
+        break;
+      case InventoryMenuAction.reduceStock:
+        _openMovementItemPicker(
+          type: InventoryMovementType.reduceStock,
+          allItems: allItems,
+        );
+        break;
+      case InventoryMenuAction.pullOutStock:
+        _openMovementItemPicker(
+          type: InventoryMovementType.pullOutStock,
+          allItems: allItems,
+        );
         break;
     }
   }
@@ -212,6 +613,10 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                 ? maxSheetHeight
                 : desiredSheetHeight;
 
+        final footerBottomPadding = media.padding.bottom > 0
+            ? (media.padding.bottom * 0.35) + 8
+            : 14.0;
+
         return StatefulBuilder(
           builder: (context, setModalState) {
             final selectedItems = allItems
@@ -225,11 +630,9 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
               top: false,
               bottom: false,
               child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: media.viewInsets.bottom,
-                ),
+                padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
                 child: Container(
-                  height: sheetHeight + media.padding.bottom,
+                  height: sheetHeight,
                   clipBehavior: Clip.antiAlias,
                   decoration: const BoxDecoration(
                     color: Colors.white,
@@ -406,7 +809,7 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                           20,
                           14,
                           20,
-                          20 + media.padding.bottom,
+                          footerBottomPadding,
                         ),
                         decoration: const BoxDecoration(
                           color: Colors.white,
@@ -452,15 +855,16 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                                     ? null
                                     : () {
                                         Navigator.pop(sheetContext);
+
+                                        final selectedCartItems =
+                                            _buildTransactionCartItems(allItems);
+
                                         Navigator.push(
                                           parentContext,
                                           MaterialPageRoute(
-                                            builder: (_) =>
-                                                StaffTransactionScreen(
-                                              allItems: allItems,
-                                              cart: Map<String, int>.from(
-                                                _cart,
-                                              ),
+                                            builder: (_) => TransactionScreen(
+                                              isActive: true,
+                                              initialCart: selectedCartItems,
                                             ),
                                           ),
                                         );
@@ -497,24 +901,12 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   }
 
   Widget _buildLoadingScaffold() {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF2F5F5),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color(0xFFBFE9E3),
-              Color(0xFFF1F3F4),
-            ],
-          ),
-        ),
-        child: const SafeArea(
-          child: Center(
-            child: CircularProgressIndicator(
-              color: Color(0xFF309E95),
-            ),
+    return const Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        child: Center(
+          child: CircularProgressIndicator(
+            color: Color(0xFF309E95),
           ),
         ),
       ),
@@ -523,30 +915,18 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
 
   Widget _buildMessageScaffold(String message) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F5F5),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color(0xFFBFE9E3),
-              Color(0xFFF1F3F4),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.black87,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
@@ -573,378 +953,346 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
         }
 
         final access = storeSnap.data!;
+
+        if (!access.canViewInventory) {
+          return _buildMessageScaffold(
+            'You do not have permission to view inventory.',
+          );
+        }
+
         final storeId = access.storeId;
         final storeName = access.storeName;
-        final canManageInventory =
-            access.role == 'admin' || access.role == 'staff';
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF2F5F5),
-          body: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  Color(0xFFBFE9E3),
-                  Color(0xFFF1F3F4),
-                ],
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('stores')
-                    .doc(storeId)
-                    .collection('items')
-                    .orderBy('name')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Error loading items:\n${snapshot.error}',
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+            bottom: false,
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('stores')
+                  .doc(storeId)
+                  .collection('items')
+                  .orderBy('name')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Error loading items:\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
 
-                  if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF309E95),
-                      ),
-                    );
-                  }
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF309E95),
+                    ),
+                  );
+                }
 
-                  final allItems = snapshot.data!.docs
-                      .map((doc) => InventoryItem.fromDoc(doc))
-                      .toList();
+                final allItems = snapshot.data!.docs
+                    .map((doc) => InventoryItem.fromDoc(doc))
+                    .toList();
 
-                  final categories = <String>{
-                    'All',
-                    ...allItems
-                        .map(
-                          (e) => e.category.trim().isEmpty
-                              ? 'Uncategorized'
-                              : e.category.trim(),
-                        )
-                        .where((e) => e.isNotEmpty),
-                  }.toList()
-                    ..sort((a, b) {
-                      if (a == 'All') return -1;
-                      if (b == 'All') return 1;
-                      return a.toLowerCase().compareTo(b.toLowerCase());
-                    });
+                final categories = <String>{
+                  'All',
+                  ...allItems
+                      .map(
+                        (e) => e.category.trim().isEmpty
+                            ? 'Uncategorized'
+                            : e.category.trim(),
+                      )
+                      .where((e) => e.isNotEmpty),
+                }.toList()
+                  ..sort((a, b) {
+                    if (a == 'All') return -1;
+                    if (b == 'All') return 1;
+                    return a.toLowerCase().compareTo(b.toLowerCase());
+                  });
 
-                  final searchedItems = allItems.where((item) {
-                    if (_search.trim().isEmpty) return true;
+                final searchedItems = allItems.where((item) {
+                  if (_search.trim().isEmpty) return true;
 
-                    return item.name
-                            .toLowerCase()
-                            .contains(_search.toLowerCase()) ||
-                        item.category
-                            .toLowerCase()
-                            .contains(_search.toLowerCase()) ||
-                        item.barcode
-                            .toLowerCase()
-                            .contains(_search.toLowerCase());
-                  }).toList();
+                  return item.name
+                          .toLowerCase()
+                          .contains(_search.toLowerCase()) ||
+                      item.category
+                          .toLowerCase()
+                          .contains(_search.toLowerCase()) ||
+                      item.barcode
+                          .toLowerCase()
+                          .contains(_search.toLowerCase());
+                }).toList();
 
-                  final sectionMap = _buildSections(searchedItems);
-                  final totalAmount = _totalAmount(allItems);
+                final sectionMap = _buildSections(searchedItems);
+                final totalAmount = _totalAmount(allItems);
 
-                  return Stack(
-                    clipBehavior: Clip.hardEdge,
-                    children: [
-                      Positioned.fill(
-                        bottom: _reservedBottomSpace + safeBottom,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(
-                            18,
-                            18,
-                            18,
-                            24,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  _StoreAvatar(
-                                    storeName: storeName,
-                                    storeLogoUrl: access.storeLogoUrl,
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Text(
-                                      storeName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 26,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.black,
-                                        shadows: [
-                                          Shadow(
-                                            color: Color(0x22000000),
-                                            blurRadius: 8,
-                                            offset: Offset(0, 3),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  if (canManageInventory)
-                                    PopupMenuButton<String>(
-                                      tooltip: 'Inventory actions',
-                                      onSelected: (value) {
-                                        _handleMenuAction(value, access);
-                                      },
-                                      itemBuilder: (context) => const [
-                                        PopupMenuItem<String>(
-                                          value: 'add',
-                                          child: Text('Add Item'),
-                                        ),
-                                        PopupMenuItem<String>(
-                                          value: 'edit',
-                                          child: Text('Edit Item'),
-                                        ),
-                                        PopupMenuItem<String>(
-                                          value: 'delete',
-                                          child: Text('Delete Item'),
+                return Stack(
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Positioned.fill(
+                      bottom: _reservedBottomSpace + safeBottom,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                _StoreAvatar(
+                                  storeName: storeName,
+                                  storeLogoUrl: access.storeLogoUrl,
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Text(
+                                    storeName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.black,
+                                      shadows: [
+                                        Shadow(
+                                          color: Color(0x22000000),
+                                          blurRadius: 8,
+                                          offset: Offset(0, 3),
                                         ),
                                       ],
-                                      icon: const Icon(
-                                        Icons.menu_rounded,
-                                        size: 34,
-                                        color: Colors.black,
-                                      ),
-                                    )
-                                  else
-                                    const Icon(
-                                      Icons.lock_outline,
-                                      size: 28,
-                                      color: Colors.black45,
                                     ),
+                                  ),
+                                ),
+                                if (access.shouldShowMenu)
+                                  PopupMenuButton<InventoryMenuAction>(
+                                    tooltip: 'Inventory actions',
+                                    onSelected: (value) {
+                                      _handleMenuAction(
+                                        value,
+                                        access,
+                                        allItems,
+                                      );
+                                    },
+                                    itemBuilder: (context) =>
+                                        _buildInventoryMenuItems(access),
+                                    icon: const Icon(
+                                      Icons.menu_rounded,
+                                      size: 34,
+                                      color: Colors.black,
+                                    ),
+                                  )
+                                else
+                                  const Icon(
+                                    Icons.lock_outline,
+                                    size: 28,
+                                    color: Colors.black45,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            Container(
+                              height: 58,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF4F7F7),
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x20000000),
+                                    blurRadius: 10,
+                                    offset: Offset(0, 4),
+                                  ),
                                 ],
                               ),
-                              const SizedBox(height: 22),
-
-                              Container(
-                                height: 58,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF4F7F7),
-                                  borderRadius: BorderRadius.circular(18),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x20000000),
-                                      blurRadius: 10,
-                                      offset: Offset(0, 4),
-                                    ),
-                                  ],
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _search = value.trim();
+                                  });
+                                },
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                                child: TextField(
-                                  controller: _searchController,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _search = value.trim();
-                                    });
-                                  },
-                                  style: const TextStyle(
+                                decoration: InputDecoration(
+                                  hintText: 'Search',
+                                  hintStyle: TextStyle(
+                                    color: Colors.black.withOpacity(0.35),
                                     fontSize: 16,
                                     fontWeight: FontWeight.w500,
                                   ),
-                                  decoration: InputDecoration(
-                                    hintText: 'Search',
-                                    hintStyle: TextStyle(
-                                      color: Colors.black.withOpacity(0.35),
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 18,
+                                  ),
+                                  suffixIcon: const Padding(
+                                    padding: EdgeInsets.only(right: 12),
+                                    child: Icon(
+                                      Icons.search_rounded,
+                                      size: 34,
+                                      color: Colors.black,
                                     ),
-                                    border: InputBorder.none,
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                    suffixIcon: const Padding(
-                                      padding: EdgeInsets.only(right: 12),
-                                      child: Icon(
-                                        Icons.search_rounded,
-                                        size: 34,
-                                        color: Colors.black,
-                                      ),
-                                    ),
-                                    suffixIconConstraints:
-                                        const BoxConstraints(
-                                      minWidth: 48,
-                                      minHeight: 48,
-                                    ),
+                                  ),
+                                  suffixIconConstraints: const BoxConstraints(
+                                    minWidth: 48,
+                                    minHeight: 48,
                                   ),
                                 ),
                               ),
-
-                              const SizedBox(height: 28),
-                              const Text(
-                                'Categories',
-                                style: TextStyle(
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.black,
-                                ),
+                            ),
+                            const SizedBox(height: 28),
+                            const Text(
+                              'Categories',
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black,
                               ),
-                              const SizedBox(height: 16),
+                            ),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              height: 142,
+                              child: ListView.separated(
+                                padding: const EdgeInsets.only(right: 18),
+                                scrollDirection: Axis.horizontal,
+                                itemCount: categories.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 16),
+                                itemBuilder: (context, index) {
+                                  final category = categories[index];
+                                  final selected =
+                                      _selectedCategory == category;
 
-                              SizedBox(
-                                height: 142,
-                                child: ListView.separated(
-                                  padding: const EdgeInsets.only(right: 18),
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: categories.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(width: 16),
-                                  itemBuilder: (context, index) {
-                                    final category = categories[index];
-                                    final selected =
-                                        _selectedCategory == category;
-
-                                    return _StaffCategoryCard(
-                                      category: category,
-                                      selected: selected,
-                                      items: allItems,
-                                      onTap: () {
-                                        setState(() {
-                                          _selectedCategory = category;
-                                        });
-                                      },
-                                    );
-                                  },
-                                ),
-                              ),
-
-                              const SizedBox(height: 18),
-
-                              if (sectionMap.isEmpty)
-                                const Padding(
-                                  padding:
-                                      EdgeInsets.symmetric(vertical: 50),
-                                  child: Center(
-                                    child: Text(
-                                      'No items found.',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                ...sectionMap.entries.map((entry) {
-                                  final category = entry.key;
-                                  final items = entry.value;
-
-                                  return Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 22),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          category,
-                                          style: const TextStyle(
-                                            fontSize: 19,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.black,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 14),
-                                        SizedBox(
-                                          height: 248,
-                                          child: ListView.separated(
-                                            padding: const EdgeInsets.only(
-                                              right: 18,
-                                            ),
-                                            scrollDirection: Axis.horizontal,
-                                            itemCount: items.length,
-                                            separatorBuilder: (_, __) =>
-                                                const SizedBox(width: 16),
-                                            itemBuilder: (context, index) {
-                                              final item = items[index];
-                                              final qty = _qtyOf(item.id);
-
-                                              return _StaffItemCard(
-                                                item: item,
-                                                qty: qty,
-                                                onAdd: () =>
-                                                    _addToCart(item),
-                                                peso: _peso,
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                  return _StaffCategoryCard(
+                                    category: category,
+                                    selected: selected,
+                                    items: allItems,
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedCategory = category;
+                                      });
+                                    },
                                   );
-                                }),
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            if (sectionMap.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 50),
+                                child: Center(
+                                  child: Text(
+                                    'No items found.',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              ...sectionMap.entries.map((entry) {
+                                final category = entry.key;
+                                final items = entry.value;
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 22),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        category,
+                                        style: const TextStyle(
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.black,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 14),
+                                      SizedBox(
+                                        height: 248,
+                                        child: ListView.separated(
+                                          padding: const EdgeInsets.only(
+                                            right: 18,
+                                          ),
+                                          scrollDirection: Axis.horizontal,
+                                          itemCount: items.length,
+                                          separatorBuilder: (_, __) =>
+                                              const SizedBox(width: 16),
+                                          itemBuilder: (context, index) {
+                                            final item = items[index];
+                                            final qty = _qtyOf(item.id);
+
+                                            return _StaffItemCard(
+                                              item: item,
+                                              qty: qty,
+                                              onAdd: () => _addToCart(item),
+                                              peso: _peso,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 20,
+                      right: 20,
+                      bottom: _basketBottomOffset + safeBottom,
+                      child: GestureDetector(
+                        onTap: () => _openCartSheet(allItems),
+                        child: Container(
+                          height: _basketHeight,
+                          padding: const EdgeInsets.symmetric(horizontal: 22),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF309E95),
+                            borderRadius: BorderRadius.circular(29),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x20000000),
+                                blurRadius: 14,
+                                offset: Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Basket - $_totalItems ${_totalItems == 1 ? 'Item' : 'Items'}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                _peso(totalAmount),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ),
-
-                      Positioned(
-                        left: 20,
-                        right: 20,
-                        bottom: _basketBottomOffset + safeBottom,
-                        child: GestureDetector(
-                          onTap: () => _openCartSheet(allItems),
-                          child: Container(
-                            height: _basketHeight,
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 22),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF309E95),
-                              borderRadius: BorderRadius.circular(29),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x20000000),
-                                  blurRadius: 14,
-                                  offset: Offset(0, 6),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    'Basket - $_totalItems ${_totalItems == 1 ? 'Item' : 'Items'}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  _peso(totalAmount),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         );
@@ -958,13 +1306,31 @@ class _StaffStoreAccess {
   final String storeName;
   final String role;
   final String storeLogoUrl;
+  final bool canViewInventory;
+  final bool canAddStock;
+  final bool canReduceStock;
+  final bool canPullOutStock;
 
   const _StaffStoreAccess({
     required this.storeId,
     required this.storeName,
     required this.role,
     required this.storeLogoUrl,
+    required this.canViewInventory,
+    required this.canAddStock,
+    required this.canReduceStock,
+    required this.canPullOutStock,
   });
+
+  bool get isAdminLike {
+    final normalized = role.trim().toLowerCase();
+    return normalized == 'admin' || normalized == 'owner';
+  }
+
+  bool get hasStaffInventoryActions =>
+      canAddStock || canReduceStock || canPullOutStock;
+
+  bool get shouldShowMenu => isAdminLike || hasStaffInventoryActions;
 }
 
 class _StoreAvatar extends StatelessWidget {
@@ -1405,7 +1771,7 @@ class InventoryItem {
   });
 
   factory InventoryItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data() ?? {};
+    final data = doc.data() ?? <String, dynamic>{};
 
     double price = 0;
     final rawPrice = data['price'];
@@ -1445,165 +1811,6 @@ class InventoryItem {
       soldBy: (data['soldBy'] ?? 'each').toString(),
       stockQty: stockQty,
       trackStock: data['trackStock'] == true,
-    );
-  }
-}
-
-class StaffTransactionScreen extends StatelessWidget {
-  final List<InventoryItem> allItems;
-  final Map<String, int> cart;
-
-  const StaffTransactionScreen({
-    super.key,
-    required this.allItems,
-    required this.cart,
-  });
-
-  String _peso(num value) => '₱${value.toStringAsFixed(2)}';
-
-  @override
-  Widget build(BuildContext context) {
-    final selectedItems =
-        allItems.where((e) => (cart[e.id] ?? 0) > 0).toList();
-    final totalItems = cart.values.fold(0, (sum, qty) => sum + qty);
-
-    double totalAmount = 0;
-    for (final item in selectedItems) {
-      totalAmount += item.price * (cart[item.id] ?? 0);
-    }
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7F8),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          'Transaction',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        iconTheme: const IconThemeData(color: Colors.black),
-      ),
-      body: selectedItems.isEmpty
-          ? const Center(
-              child: Text(
-                'Your basket is empty.',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            )
-          : Column(
-              children: [
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: selectedItems.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final item = selectedItems[index];
-                      final qty = cart[item.id] ?? 0;
-                      final subtotal = item.price * qty;
-
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x12000000),
-                              blurRadius: 10,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            _ProductThumb(
-                              item: item,
-                              size: 56,
-                              radius: 14,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Qty: $qty',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.black54,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              _peso(subtotal),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Color(0x12000000),
-                        blurRadius: 10,
-                        offset: Offset(0, -2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Items: $totalItems',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        _peso(totalAmount),
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF309E95),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
     );
   }
 }

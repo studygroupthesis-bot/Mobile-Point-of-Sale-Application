@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:device_preview/device_preview.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 
 import 'firebase/firebase_options.dart';
 import 'screens/auth/intro_screen.dart';
@@ -18,7 +18,7 @@ Future<void> main() async {
 
   runApp(
     DevicePreview(
-      enabled: kDebugMode && kIsWeb,
+      enabled: !kReleaseMode && kIsWeb,
       builder: (context) => const PopPayRoot(),
     ),
   );
@@ -95,6 +95,7 @@ class PopPayRoot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      useInheritedMediaQuery: true,
       builder: DevicePreview.appBuilder,
       locale: DevicePreview.locale(context),
       debugShowCheckedModeBanner: false,

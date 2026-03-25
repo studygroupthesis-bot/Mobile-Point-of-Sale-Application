@@ -22,9 +22,15 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   final TextEditingController _searchController = TextEditingController();
-  String _selectedCategory = 'All';
 
-  late final Future<Map<String, String>> _storeAccessFuture;
+  String _selectedCategory = 'All';
+  String _search = '';
+
+  late final Future<_AdminStoreAccess> _storeAccessFuture;
+
+  static const double _floatingPanelHeight = 35;
+  static const double _floatingPanelBottomOffset = 30;
+  static const double _reservedBottomSpace = 100;
 
   @override
   void initState() {
@@ -38,23 +44,21 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.dispose();
   }
 
-  Future<Map<String, String>> _getStoreAccess() async {
+  Future<_AdminStoreAccess> _getStoreAccess() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      throw Exception("Not logged in.");
+      throw Exception('Not logged in.');
     }
 
-    final userSnap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final userSnap =
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
     final userData = userSnap.data();
     final storeId = userData?['storeId'] as String?;
 
     if (storeId == null || storeId.isEmpty) {
       throw Exception(
-        "Missing storeId in users/${user.uid}. Add storeId to the user profile.",
+        'Missing storeId in users/${user.uid}. Add storeId to the user profile.',
       );
     }
 
@@ -63,14 +67,26 @@ class _InventoryScreenState extends State<InventoryScreen> {
         .doc(storeId)
         .get();
 
-    final storeData = storeSnap.data();
-    final storeName =
-        (storeData?['business_name'] ?? 'Store').toString().trim();
+    final storeData = storeSnap.data() ?? <String, dynamic>{};
 
-    return {
-      'storeId': storeId,
-      'storeName': storeName,
-    };
+    final storeName =
+        (storeData['business_name'] ?? storeData['storeName'] ?? 'Store')
+            .toString()
+            .trim();
+
+    final storeLogoUrl = (storeData['logoUrl'] ??
+            storeData['storeLogoUrl'] ??
+            storeData['logo_url'] ??
+            storeData['imageUrl'] ??
+            '')
+        .toString()
+        .trim();
+
+    return _AdminStoreAccess(
+      storeId: storeId,
+      storeName: storeName.isEmpty ? 'Store' : storeName,
+      storeLogoUrl: storeLogoUrl,
+    );
   }
 
   void _openStockLogs(BuildContext context) {
@@ -113,31 +129,49 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  String _normalizeCategory(dynamic value) {
-    final text = value?.toString().trim() ?? '';
-    if (text.isEmpty) return 'Uncategorized';
-    return text;
-  }
+  String _peso(num value) => '₱${value.toStringAsFixed(2)}';
 
-  Map<String, dynamic>? _previewDataForCategory(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    String category,
-  ) {
-    for (final doc in docs) {
-      final data = doc.data();
-      if (_normalizeCategory(data['category']) == category) {
-        return data;
-      }
+  Map<String, List<InventoryItem>> _buildSections(List<InventoryItem> items) {
+    final Map<String, List<InventoryItem>> grouped = {};
+
+    for (final item in items) {
+      final category =
+          item.category.trim().isEmpty ? 'Uncategorized' : item.category.trim();
+      grouped.putIfAbsent(category, () => []);
+      grouped[category]!.add(item);
     }
-    return null;
+
+    for (final entry in grouped.entries) {
+      entry.value.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    }
+
+    if (_selectedCategory == 'All') {
+      final sortedKeys = grouped.keys.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      return {
+        for (final key in sortedKeys) key: grouped[key]!,
+      };
+    }
+
+    final selected = grouped.entries.where(
+      (e) => e.key.toLowerCase() == _selectedCategory.toLowerCase(),
+    );
+
+    return {
+      for (final entry in selected) entry.key: entry.value,
+    };
   }
 
   Widget _buildLoadingScaffold() {
     return const Scaffold(
-      backgroundColor: Color(0xFFD78383),
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: Center(
-          child: CircularProgressIndicator(),
+          child: CircularProgressIndicator(
+            color: Color(0xFF309E95),
+          ),
         ),
       ),
     );
@@ -145,7 +179,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
   Widget _buildMessageScaffold(String message) {
     return Scaffold(
-      backgroundColor: const Color(0xFFD78383),
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -153,10 +187,111 @@ class _InventoryScreenState extends State<InventoryScreen> {
             child: Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(
+                color: Colors.black87,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showMenuMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget _buildCategorySection(
+    BuildContext context, {
+    required String category,
+    required List<InventoryItem> items,
+  }) {
+    final bool showHorizontal = _selectedCategory == 'All';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            category,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Colors.black,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (showHorizontal)
+            SizedBox(
+              height: 185,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                padding: const EdgeInsets.only(right: 18),
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+
+                  return SizedBox(
+                    width: 148,
+                    child: _AdminItemCard(
+                      item: item,
+                      peso: _peso,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => EditItemScreen(
+                              itemId: item.id,
+                              itemData: item.rawData,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: 0.80,
+              ),
+              itemBuilder: (context, index) {
+                final item = items[index];
+
+                return _AdminItemCard(
+                  item: item,
+                  peso: _peso,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EditItemScreen(
+                          itemId: item.id,
+                          itemData: item.rawData,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+        ],
       ),
     );
   }
@@ -166,10 +301,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return _buildMessageScaffold("Please login first.");
+      return _buildMessageScaffold('Please login first.');
     }
 
-    return FutureBuilder<Map<String, String>>(
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+
+    return FutureBuilder<_AdminStoreAccess>(
       future: _storeAccessFuture,
       builder: (context, storeSnap) {
         if (storeSnap.connectionState == ConnectionState.waiting) {
@@ -178,180 +315,260 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
         if (storeSnap.hasError) {
           return _buildMessageScaffold(
-            "Store access error:\n${storeSnap.error}",
+            'Store access error:\n${storeSnap.error}',
           );
         }
 
-        final storeId = storeSnap.data!['storeId']!;
-        final storeName = storeSnap.data!['storeName']!;
+        final access = storeSnap.data!;
+        final storeId = access.storeId;
+        final storeName = access.storeName;
 
         return Scaffold(
-          backgroundColor: const Color(0xFFD78383),
+          backgroundColor: Colors.transparent,
           body: SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE6E6E6),
-                      borderRadius: BorderRadius.circular(18),
+            bottom: false,
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('stores')
+                  .doc(storeId)
+                  .collection('items')
+                  .orderBy('name')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Firestore error:\n${snapshot.error}',
+                      textAlign: TextAlign.center,
                     ),
-                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: FirebaseFirestore.instance
-                          .collection('stores')
-                          .doc(storeId)
-                          .collection('items')
-                          .orderBy('created_at', descending: true)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
+                  );
+                }
 
-                        if (snapshot.hasError) {
-                          return Center(
-                            child: Text(
-                              "Firestore error:\n${snapshot.error}",
-                              textAlign: TextAlign.center,
-                            ),
-                          );
-                        }
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF309E95),
+                    ),
+                  );
+                }
 
-                        final allDocs = snapshot.data?.docs ?? [];
+                final allItems = snapshot.data!.docs
+                    .map((doc) => InventoryItem.fromDoc(doc))
+                    .toList();
 
-                        final fetchedCategories = allDocs
-                            .map((doc) =>
-                                _normalizeCategory(doc.data()['category']))
-                            .toSet()
-                            .toList()
-                          ..sort();
+                final categories = <String>{
+                  'All',
+                  ...allItems
+                      .map(
+                        (e) => e.category.trim().isEmpty
+                            ? 'Uncategorized'
+                            : e.category.trim(),
+                      )
+                      .where((e) => e.isNotEmpty),
+                }.toList()
+                  ..sort((a, b) {
+                    if (a == 'All') return -1;
+                    if (b == 'All') return 1;
+                    return a.toLowerCase().compareTo(b.toLowerCase());
+                  });
 
-                        final categories = ['All', ...fetchedCategories];
+                final searchedItems = allItems.where((item) {
+                  if (_search.trim().isEmpty) return true;
 
-                        final query =
-                            _searchController.text.trim().toLowerCase();
+                  final q = _search.toLowerCase();
+                  return item.name.toLowerCase().contains(q) ||
+                      item.category.toLowerCase().contains(q) ||
+                      item.barcode.toLowerCase().contains(q);
+                }).toList();
 
-                        final filteredDocs = allDocs.where((doc) {
-                          final data = doc.data();
-                          final name =
-                              (data['name'] ?? '').toString().toLowerCase();
-                          final category = _normalizeCategory(data['category']);
+                final sectionMap = _buildSections(searchedItems);
 
-                          final matchCategory = _selectedCategory == 'All'
-                              ? true
-                              : category == _selectedCategory;
-
-                          final matchSearch =
-                              query.isEmpty || name.contains(query);
-
-                          return matchCategory && matchSearch;
-                        }).toList();
-
-                        final Map<
-                            String,
-                            List<
-                                QueryDocumentSnapshot<
-                                    Map<String, dynamic>>>> grouped = {};
-
-                        for (final doc in filteredDocs) {
-                          final category =
-                              _normalizeCategory(doc.data()['category']);
-                          grouped.putIfAbsent(category, () => []).add(doc);
-                        }
-
-                        final sectionNames = _selectedCategory == 'All'
-                            ? fetchedCategories
-                                .where((c) => grouped[c]?.isNotEmpty ?? false)
-                                .toList()
-                            : (grouped[_selectedCategory]?.isNotEmpty ?? false)
-                                ? [_selectedCategory]
-                                : <String>[];
-
-                        return Column(
+                return Stack(
+                  children: [
+                    Positioned.fill(
+                      bottom: _reservedBottomSpace + safeBottom,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _InventoryHeader(
-                              storeName: storeName,
-                              isAdmin: widget.isAdmin,
-                              onMenuSelected: (value) {
-                                if (value == 'stock_logs') {
-                                  _openStockLogs(context);
-                                } else if (value == 'inventory_overview') {
-                                  _openInventoryOverview(
-                                    context,
-                                    storeId: storeId,
-                                    storeName: storeName,
-                                  );
-                                } else if (value == 'batch_details') {
-                                  _openBatchSelector(
-                                    context,
-                                    storeId: storeId,
-                                    storeName: storeName,
-                                  );
-                                } else if (value == 'create_item') {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const CreateItemScreen(),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                _StoreAvatar(
+                                  storeName: storeName,
+                                  storeLogoUrl: access.storeLogoUrl,
+                                  size: 50,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      storeName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.black,
+                                        height: 1.05,
+                                      ),
                                     ),
-                                  );
-                                } else if (value == 'edit_hint') {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text("Tap an item card to edit"),
+                                  ),
+                                ),
+                                Container(
+                                  width: 42,
+                                  height: 42,
+                                  decoration: BoxDecoration(
+                                    color:
+                                        const Color(0xFFFFFFFF).withAlpha(128),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: PopupMenuButton<String>(
+                                    tooltip: 'Inventory actions',
+                                    color: Colors.white,
+                                    padding: EdgeInsets.zero,
+                                    onSelected: (value) {
+                                      if (value == 'stock_logs') {
+                                        _openStockLogs(context);
+                                      } else if (value == 'create_item') {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const CreateItemScreen(),
+                                          ),
+                                        );
+                                      } else if (value == 'edit_hint') {
+                                        _showMenuMessage(
+                                          'Tap an item card to edit.',
+                                        );
+                                      } else if (value ==
+                                          'inventory_overview') {
+                                        _openInventoryOverview(
+                                          context,
+                                          storeId: storeId,
+                                          storeName: storeName,
+                                        );
+                                      } else if (value == 'batch_details') {
+                                        _openBatchSelector(
+                                          context,
+                                          storeId: storeId,
+                                          storeName: storeName,
+                                        );
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'stock_logs',
+                                        child: Text('Stock Logs'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'create_item',
+                                        child: Text('Create Item'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'edit_hint',
+                                        child: Text('Edit Item'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'inventory_overview',
+                                        child: Text('Inventory Overview'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'batch_details',
+                                        child: Text('Batch Details'),
+                                      ),
+                                    ],
+                                    icon: const Icon(
+                                      Icons.menu_rounded,
+                                      size: 24,
+                                      color: Colors.black,
                                     ),
-                                  );
-                                }
-                              },
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 14),
                             Container(
-                              height: 42,
+                              height: 48,
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.70),
-                                borderRadius: BorderRadius.circular(10),
+                                color: const Color(0xFFF6F8F8),
+                                borderRadius: BorderRadius.circular(15),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x18000000),
+                                    blurRadius: 10,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ],
                               ),
                               child: TextField(
                                 controller: _searchController,
-                                onChanged: (_) => setState(() {}),
-                                decoration: const InputDecoration(
-                                  hintText: "Search",
-                                  prefixIcon: Icon(Icons.search, size: 20),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _search = value.trim();
+                                  });
+                                },
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Search',
+                                  hintStyle: TextStyle(
+                                    color: Colors.black.withAlpha(90),
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                   border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 10,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                  suffixIcon: const Padding(
+                                    padding: EdgeInsets.only(right: 10),
+                                    child: Icon(
+                                      Icons.search_rounded,
+                                      size: 28,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                  suffixIconConstraints: const BoxConstraints(
+                                    minWidth: 42,
+                                    minHeight: 42,
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'Categories',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             SizedBox(
-                              height: 95,
+                              height: 92,
                               child: ListView.separated(
+                                padding: const EdgeInsets.only(right: 18),
                                 scrollDirection: Axis.horizontal,
                                 itemCount: categories.length,
                                 separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 8),
+                                    const SizedBox(width: 10),
                                 itemBuilder: (context, index) {
                                   final category = categories[index];
-                                  final isSelected =
+                                  final selected =
                                       _selectedCategory == category;
 
-                                  return _CategoryTile(
-                                    label: category,
-                                    isSelected: isSelected,
-                                    previewData: category == 'All'
-                                        ? null
-                                        : _previewDataForCategory(
-                                            allDocs,
-                                            category,
-                                          ),
+                                  return _AdminCategoryCard(
+                                    category: category,
+                                    selected: selected,
+                                    items: allItems,
                                     onTap: () {
                                       setState(() {
                                         _selectedCategory = category;
@@ -361,113 +578,120 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 },
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Expanded(
-                              child: sectionNames.isEmpty
-                                  ? Center(
-                                      child: Text(
-                                        allDocs.isEmpty
-                                            ? "No items yet"
-                                            : "No items found",
-                                        style: const TextStyle(
-                                          color: Colors.grey,
-                                          fontSize: 14,
+                            const SizedBox(height: 18),
+                            if (sectionMap.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 50),
+                                child: Center(
+                                  child: Text(
+                                    'No items found.',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              ...sectionMap.entries.map((entry) {
+                                return _buildCategorySection(
+                                  context,
+                                  category: entry.key,
+                                  items: entry.value,
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 18,
+                      right: 18,
+                      bottom: _floatingPanelBottomOffset + safeBottom,
+                      child: SafeArea(
+                        top: false,
+                        child: SizedBox(
+                          height: _floatingPanelHeight,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: SizedBox(
+                                  height: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const CreateItemScreen(),
                                         ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          const Color(0xFF309E95),
+                                      foregroundColor: Colors.white,
+                                      elevation: 6,
+                                      shadowColor: const Color(0x22000000),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(18),
                                       ),
-                                    )
-                                  : SingleChildScrollView(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          for (final section
-                                              in sectionNames) ...[
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                top: 6,
-                                                bottom: 8,
-                                              ),
-                                              child: Text(
-                                                section,
-                                                style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Colors.black87,
-                                                ),
-                                              ),
-                                            ),
-                                            GridView.builder(
-                                              shrinkWrap: true,
-                                              physics:
-                                                  const NeverScrollableScrollPhysics(),
-                                              itemCount:
-                                                  grouped[section]!.length,
-                                              gridDelegate:
-                                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                                crossAxisCount: 2,
-                                                crossAxisSpacing: 10,
-                                                mainAxisSpacing: 10,
-                                                mainAxisExtent: 145,
-                                              ),
-                                              itemBuilder: (context, index) {
-                                                final doc =
-                                                    grouped[section]![index];
-                                                return InventoryCard(
-                                                  itemId: doc.id,
-                                                  itemData: doc.data(),
-                                                  isAdmin: widget.isAdmin,
-                                                );
-                                              },
-                                            ),
-                                            const SizedBox(height: 8),
-                                          ],
-                                          if (widget.isAdmin) ...[
-                                            const SizedBox(height: 8),
-                                            Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.spaceEvenly,
-                                              children: [
-                                                _BottomActionButton(
-                                                  text: 'Create Item',
-                                                  onTap: () {
-                                                    Navigator.push(
-                                                      context,
-                                                      MaterialPageRoute(
-                                                        builder: (_) =>
-                                                            const CreateItemScreen(),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                                _BottomActionButton(
-                                                  text: 'Edit Item',
-                                                  onTap: () {
-                                                    ScaffoldMessenger.of(
-                                                            context)
-                                                        .showSnackBar(
-                                                      const SnackBar(
-                                                        content: Text(
-                                                          "Tap an item card to edit",
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 8),
-                                          ],
-                                        ],
+                                      padding: EdgeInsets.zero,
+                                    ),
+                                    child: const Text(
+                                      'Create Item',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
                                       ),
                                     ),
-                            ),
-                          ],
-                        );
-                      },
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: SizedBox(
+                                  height: double.infinity,
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      _showMenuMessage(
+                                        'Tap an item card to edit.',
+                                      );
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor:
+                                          const Color(0xFF309E95),
+                                      side: const BorderSide(
+                                        color: Color(0xFF309E95),
+                                      ),
+                                      backgroundColor:
+                                          const Color(0xFFEAF7F4),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(18),
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                    ),
+                                    child: const Text(
+                                      'Edit Item',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
         );
@@ -476,114 +700,111 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 }
 
-class _InventoryHeader extends StatelessWidget {
+class _AdminStoreAccess {
+  final String storeId;
   final String storeName;
-  final bool isAdmin;
-  final ValueChanged<String> onMenuSelected;
+  final String storeLogoUrl;
 
-  const _InventoryHeader({
+  const _AdminStoreAccess({
+    required this.storeId,
     required this.storeName,
-    required this.isAdmin,
-    required this.onMenuSelected,
+    required this.storeLogoUrl,
+  });
+}
+
+class _StoreAvatar extends StatelessWidget {
+  final String storeName;
+  final String storeLogoUrl;
+  final double size;
+
+  const _StoreAvatar({
+    required this.storeName,
+    required this.storeLogoUrl,
+    this.size = 56,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+    final initial =
+        storeName.trim().isEmpty ? 'S' : storeName.trim()[0].toUpperCase();
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
           ),
-          alignment: Alignment.center,
-          child: const Icon(
-            Icons.shopping_bag_rounded,
-            color: Color(0xFFD84C9A),
-            size: 20,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            storeName,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF153A39),
-            ),
-          ),
-        ),
-        PopupMenuButton<String>(
-          color: Colors.white,
-          icon: const Icon(Icons.menu_rounded, color: Colors.black87),
-          onSelected: onMenuSelected,
-          itemBuilder: (context) => [
-            if (isAdmin)
-              const PopupMenuItem(
-                value: 'stock_logs',
-                child: Text('Stock Logs'),
+        ],
+      ),
+      child: ClipOval(
+        child: storeLogoUrl.isNotEmpty
+            ? Image.network(
+                storeLogoUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Center(
+                  child: Text(
+                    initial,
+                    style: TextStyle(
+                      fontSize: size * 0.42,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFFB11C8E),
+                    ),
+                  ),
+                ),
+              )
+            : Center(
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    fontSize: size * 0.42,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFFB11C8E),
+                  ),
+                ),
               ),
-            if (isAdmin)
-              const PopupMenuItem(
-                value: 'create_item',
-                child: Text('Create Item'),
-              ),
-            if (isAdmin)
-              const PopupMenuItem(
-                value: 'edit_hint',
-                child: Text('Edit Item'),
-              ),
-            if (isAdmin)
-              const PopupMenuItem(
-                value: 'inventory_overview',
-                child: Text('Inventory Overview'),
-              ),
-            if (isAdmin)
-              const PopupMenuItem(
-                value: 'batch_details',
-                child: Text('Batch Details'),
-              ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 }
 
-class _CategoryTile extends StatelessWidget {
-  final String label;
-  final bool isSelected;
-  final Map<String, dynamic>? previewData;
+class _AdminCategoryCard extends StatelessWidget {
+  final String category;
+  final bool selected;
+  final List<InventoryItem> items;
   final VoidCallback onTap;
 
-  const _CategoryTile({
-    required this.label,
-    required this.isSelected,
+  const _AdminCategoryCard({
+    required this.category,
+    required this.selected,
+    required this.items,
     required this.onTap,
-    this.previewData,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bgColor =
-        isSelected ? const Color(0xFF72B9B0) : const Color(0xFFCFE7E3);
+    final bg = selected ? const Color(0xFF5A9896) : const Color(0xFFB0D8D6);
+    final fg = selected ? Colors.white : Colors.black;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 72,
-        padding: const EdgeInsets.all(8),
+        width: 96,
+        height: 92,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(10),
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
           boxShadow: const [
             BoxShadow(
-              color: Colors.black12,
-              blurRadius: 3,
-              offset: Offset(0, 2),
+              color: Color(0x22000000),
+              blurRadius: 8,
+              offset: Offset(0, 4),
             ),
           ],
         ),
@@ -591,23 +812,30 @@ class _CategoryTile extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Expanded(
-              child: label == 'All'
-                  ? const Icon(
-                      Icons.grid_view_rounded,
-                      color: Colors.white,
-                      size: 28,
-                    )
-                  : _MiniPreview(previewData: previewData),
+              child: Center(
+                child: category == 'All'
+                    ? Icon(
+                        Icons.grid_view_rounded,
+                        size: 50,
+                        color: fg,
+                      )
+                    : _CategoryThumb(
+                        category: category,
+                        items: items,
+                      ),
+              ),
             ),
             const SizedBox(height: 4),
             Text(
-              label,
-              maxLines: 1,
+              category,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 9.5,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.05,
                 fontWeight: FontWeight.w600,
+                color: fg,
               ),
             ),
           ],
@@ -617,257 +845,317 @@ class _CategoryTile extends StatelessWidget {
   }
 }
 
-class _MiniPreview extends StatelessWidget {
-  final Map<String, dynamic>? previewData;
-
-  const _MiniPreview({this.previewData});
-
-  @override
-  Widget build(BuildContext context) {
-    final repType = previewData?['representationType'] as String?;
-    final colorValue = previewData?['colorValue'];
-    final imageUrl = previewData?['imageUrl'] as String?;
-
-    if (repType == 'image' && imageUrl != null && imageUrl.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          imageUrl,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const Icon(Icons.fastfood_rounded),
-        ),
-      );
-    }
-
-    if (repType == 'color' && colorValue != null) {
-      return Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          color: Color(colorValue),
-          borderRadius: BorderRadius.circular(8),
-        ),
-      );
-    }
-
-    return const Icon(Icons.fastfood_rounded, size: 26);
-  }
-}
-
-class _BottomActionButton extends StatelessWidget {
-  final String text;
+class _AdminItemCard extends StatelessWidget {
+  final InventoryItem item;
+  final String Function(num value) peso;
   final VoidCallback onTap;
 
-  const _BottomActionButton({
-    required this.text,
+  const _AdminItemCard({
+    required this.item,
+    required this.peso,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 112,
-      height: 34,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF59B8AA),
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          padding: EdgeInsets.zero,
+    final stock = item.stockQty ?? 0;
+    final hasStock = item.trackStock && item.stockQty != null;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD8E1E5),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 10,
+              offset: Offset(0, 5),
+            ),
+          ],
         ),
-        onPressed: onTap,
-        child: Text(
-          text,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-          ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 2),
+                Center(
+                  child: Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFFFF).withAlpha(72),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    alignment: Alignment.center,
+                    child: _ProductThumb(
+                      item: item,
+                      size: 60,
+                      radius: 14,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.2,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  peso(item.price),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                if (hasStock)
+                  Text(
+                    'Stock: $stock',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+              ],
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFFFF).withAlpha(210),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.edit_rounded,
+                    size: 16,
+                    color: Color(0xFF33AAA0),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class InventoryCard extends StatelessWidget {
-  final String itemId;
-  final Map<String, dynamic> itemData;
-  final bool isAdmin;
+class _ProductThumb extends StatelessWidget {
+  final InventoryItem item;
+  final double size;
+  final double radius;
 
-  const InventoryCard({
-    super.key,
-    required this.itemId,
-    required this.itemData,
-    required this.isAdmin,
+  const _ProductThumb({
+    required this.item,
+    required this.size,
+    required this.radius,
   });
 
-  String _priceText(dynamic value) {
-    if (value is int) return '₱ $value';
-    if (value is double) {
-      return value == value.toInt()
-          ? '₱ ${value.toInt()}'
-          : '₱ ${value.toStringAsFixed(2)}';
-    }
-    return '₱ ${value ?? 0}';
-  }
-
-  int _stockValue(Map<String, dynamic> data) {
-    final stock = data['stockQty'] ?? data['stock'] ?? data['quantity'] ?? 0;
-    if (stock is int) return stock;
-    return int.tryParse(stock.toString()) ?? 0;
-  }
-
-  Widget _leadingPreview() {
-    final repType = itemData['representationType'] as String?;
-    final colorValue = itemData['colorValue'];
-    final imageUrl = itemData['imageUrl'] as String?;
-
-    if (repType == 'image' && imageUrl != null && imageUrl.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          imageUrl,
-          width: 58,
-          height: 58,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(8),
+  @override
+  Widget build(BuildContext context) {
+    if (item.imageUrl != null && item.imageUrl!.trim().isNotEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Image.network(
+            item.imageUrl!,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => _FallbackItemVisual(
+              item: item,
+              size: size,
+              radius: radius,
             ),
-            child: const Icon(Icons.image_not_supported),
           ),
         ),
       );
     }
 
-    if (repType == 'color' && colorValue != null) {
+    return _FallbackItemVisual(
+      item: item,
+      size: size,
+      radius: radius,
+    );
+  }
+}
+
+class _FallbackItemVisual extends StatelessWidget {
+  final InventoryItem item;
+  final double size;
+  final double radius;
+
+  const _FallbackItemVisual({
+    required this.item,
+    required this.size,
+    required this.radius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.representationType == 'color' && item.colorValue != null) {
       return Container(
-        width: 58,
-        height: 58,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
-          color: Color(colorValue),
-          borderRadius: BorderRadius.circular(8),
+          color: Color(item.colorValue!),
+          borderRadius: BorderRadius.circular(radius),
         ),
       );
     }
 
     return Container(
-      width: 58,
-      height: 58,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: Colors.grey.shade300,
-        borderRadius: BorderRadius.circular(8),
+        color: const Color(0xFFE7ECED),
+        borderRadius: BorderRadius.circular(radius),
       ),
-      child: const Icon(Icons.inventory_2_outlined),
-    );
-  }
-
-  void _openEdit(BuildContext context) {
-    if (!isAdmin) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => EditItemScreen(
-          itemId: itemId,
-          itemData: itemData,
-        ),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.inventory_2_outlined,
+        color: Colors.black.withAlpha(88),
+        size: size * 0.42,
       ),
     );
   }
+}
+
+class _CategoryThumb extends StatelessWidget {
+  final String category;
+  final List<InventoryItem> items;
+
+  const _CategoryThumb({
+    required this.category,
+    required this.items,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final name = (itemData['name'] ?? 'No name').toString();
-    final price = _priceText(itemData['price']);
-    final stock = _stockValue(itemData);
+    InventoryItem? first;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: isAdmin ? () => _openEdit(context) : null,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: const Color(0xFFD8F0EC),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 3,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            if (isAdmin)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: GestureDetector(
-                  onTap: () => _openEdit(context),
-                  child: const Icon(
-                    Icons.edit_square,
-                    color: Colors.red,
-                    size: 14,
-                  ),
-                ),
-              ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Center(child: _leadingPreview()),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 10.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  price,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 18,
-                height: 18,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF5BBBB0),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '$stock',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    for (final item in items) {
+      final normalized =
+          item.category.trim().isEmpty ? 'Uncategorized' : item.category.trim();
+
+      if (normalized.toLowerCase() == category.toLowerCase()) {
+        first = item;
+        break;
+      }
+    }
+
+    if (first == null) {
+      return const Icon(
+        Icons.category_outlined,
+        size: 28,
+        color: Colors.black87,
+      );
+    }
+
+    return _ProductThumb(
+      item: first,
+      size: 53,
+      radius: 8,
+    );
+  }
+}
+
+class InventoryItem {
+  final String id;
+  final String barcode;
+  final String category;
+  final int? colorValue;
+  final String? imageUrl;
+  final String name;
+  final double price;
+  final String representationType;
+  final String soldBy;
+  final int? stockQty;
+  final bool trackStock;
+  final Map<String, dynamic> rawData;
+
+  InventoryItem({
+    required this.id,
+    required this.barcode,
+    required this.category,
+    required this.colorValue,
+    required this.imageUrl,
+    required this.name,
+    required this.price,
+    required this.representationType,
+    required this.soldBy,
+    required this.stockQty,
+    required this.trackStock,
+    required this.rawData,
+  });
+
+  factory InventoryItem.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? {};
+
+    double price = 0;
+    final rawPrice = data['price'];
+    if (rawPrice is int) {
+      price = rawPrice.toDouble();
+    } else if (rawPrice is double) {
+      price = rawPrice;
+    } else if (rawPrice is String) {
+      price = double.tryParse(rawPrice) ?? 0;
+    }
+
+    int? colorValue;
+    final rawColor = data['colorValue'];
+    if (rawColor is int) {
+      colorValue = rawColor;
+    } else if (rawColor is num) {
+      colorValue = rawColor.toInt();
+    }
+
+    int? stockQty;
+    final rawStock = data['stockQty'] ?? data['stock'] ?? data['quantity'];
+    if (rawStock is int) {
+      stockQty = rawStock;
+    } else if (rawStock is double) {
+      stockQty = rawStock.toInt();
+    } else if (rawStock is String) {
+      stockQty = int.tryParse(rawStock);
+    }
+
+    return InventoryItem(
+      id: doc.id,
+      barcode: (data['barcode'] ?? '').toString(),
+      category: (data['category'] ?? 'Uncategorized').toString(),
+      colorValue: colorValue,
+      imageUrl: data['imageUrl']?.toString(),
+      name: (data['name'] ?? 'Unnamed Item').toString(),
+      price: price,
+      representationType: (data['representationType'] ?? '').toString(),
+      soldBy: (data['soldBy'] ?? 'each').toString(),
+      stockQty: stockQty,
+      trackStock: data['trackStock'] == true,
+      rawData: Map<String, dynamic>.from(data),
     );
   }
 }
