@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'receipt_screen.dart';
+
 class CartItem {
   final String itemId;
   final String name;
@@ -81,6 +83,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   DateTime? _lastScannedAt;
 
   final List<Map<String, dynamic>> _cartItems = [];
+  List<DocumentSnapshot<Map<String, dynamic>>> _liveSuggestions = [];
 
   static const Color _navy = Color(0xFF083B7A);
   static const Color _teal = Color(0xFF2F9E9C);
@@ -333,6 +336,65 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return total;
   }
 
+  String _buildPublicReceiptUrl({
+    required String storeId,
+    required String transactionId,
+  }) {
+    return 'posapp://receipt?storeId=$storeId&transactionId=$transactionId';
+  }
+
+  Future<void> _savePublicReceipt({
+    required String storeId,
+    required String transactionId,
+    required String invoiceNo,
+    required String cashierUid,
+    required String paymentMode,
+    required double subtotal,
+    required double taxableSales,
+    required bool taxEnabled,
+    required String taxName,
+    required double taxRate,
+    required bool taxInclusive,
+    required double tax,
+    required double grandTotal,
+    required double amountReceived,
+    required double change,
+    required List<Map<String, dynamic>> items,
+    required String storeName,
+    required DateTime now,
+  }) async {
+    await FirebaseFirestore.instance
+        .collection('stores')
+        .doc(storeId)
+        .collection('public_receipts')
+        .doc(transactionId)
+        .set({
+      'transactionId': transactionId,
+      'invoiceId': transactionId,
+      'invoiceNo': invoiceNo,
+      'storeId': storeId,
+      'storeName': storeName,
+      'cashierUid': cashierUid,
+      'paymentMode': paymentMode,
+      'paymentMethod': paymentMode,
+      'subtotal': subtotal,
+      'taxableSales': taxableSales,
+      'taxEnabled': taxEnabled,
+      'taxName': taxName,
+      'taxRate': taxRate,
+      'taxInclusive': taxInclusive,
+      'tax': tax,
+      'taxAmount': tax,
+      'grandTotal': grandTotal,
+      'total': grandTotal,
+      'amountReceived': amountReceived,
+      'change': change,
+      'items': items,
+      'createdAt': FieldValue.serverTimestamp(),
+      'createdAtLocal': now.toIso8601String(),
+    });
+  }
+
   Future<DocumentSnapshot<Map<String, dynamic>>?> _findItemByBarcode(
     String rawBarcode,
   ) async {
@@ -358,7 +420,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
     ];
 
     for (final field in exactFields) {
-      final snap = await collection.where(field, isEqualTo: normalized).limit(1).get();
+      final snap =
+          await collection.where(field, isEqualTo: normalized).limit(1).get();
       if (snap.docs.isNotEmpty) return snap.docs.first;
     }
 
@@ -531,6 +594,44 @@ class _TransactionScreenState extends State<TransactionScreen> {
     await _addItemByBarcode(result);
   }
 
+  Future<void> _updateLiveSuggestions(String rawQuery) async {
+    final storeId = _storeId;
+    final query = rawQuery.trim();
+
+    if (storeId == null || storeId.isEmpty) return;
+
+    if (query.isEmpty) {
+      if (!mounted) return;
+      setState(() => _liveSuggestions = []);
+      return;
+    }
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(storeId)
+          .collection('items')
+          .get();
+
+      final results = snap.docs.where((doc) {
+        return _matchesSearch(doc.data(), query);
+      }).toList()
+        ..sort((a, b) {
+          final rankA = _searchRank(a.data(), query);
+          final rankB = _searchRank(b.data(), query);
+          return rankA.compareTo(rankB);
+        });
+
+      if (!mounted) return;
+      setState(() {
+        _liveSuggestions = results.take(6).toList();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _liveSuggestions = []);
+    }
+  }
+
   Future<void> _searchAndPickItem() async {
     final storeId = _storeId;
     final rawQuery = _searchController.text.trim();
@@ -558,6 +659,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       if (barcodeMatch != null && barcodeMatch.exists) {
         _addItemDocumentToCart(barcodeMatch);
         _searchController.clear();
+        setState(() => _liveSuggestions = []);
         return;
       }
 
@@ -585,6 +687,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       if (results.length == 1) {
         _addItemDocumentToCart(results.first);
         _searchController.clear();
+        setState(() => _liveSuggestions = []);
         return;
       }
 
@@ -644,6 +747,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       if (picked != null) {
         _addItemDocumentToCart(picked);
         _searchController.clear();
+        setState(() => _liveSuggestions = []);
       }
     } catch (e) {
       if (!mounted) return;
@@ -736,6 +840,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final txRef =
           db.collection('stores').doc(storeId).collection('transactions').doc();
       final now = DateTime.now();
+      final invoiceNo = 'INV-${now.millisecondsSinceEpoch}';
+      final resolvedStoreName =
+          (_storeName == null || _storeName!.trim().isEmpty)
+              ? 'Store'
+              : _storeName!.trim();
 
       final items = _cartItems.map((item) {
         final price = _toDouble(item['price']);
@@ -755,7 +864,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
         };
       }).toList();
 
-      final invoiceNo = 'INV-${now.millisecondsSinceEpoch}';
+      final publicReceiptUrl = _buildPublicReceiptUrl(
+        storeId: storeId,
+        transactionId: txRef.id,
+      );
+
       final batch = db.batch();
 
       batch.set(txRef, {
@@ -763,9 +876,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         'invoiceNo': invoiceNo,
         'invoiceNoLower': invoiceNo.toLowerCase(),
         'storeId': storeId,
-        'storeName': (_storeName == null || _storeName!.trim().isEmpty)
-            ? 'Store'
-            : _storeName!.trim(),
+        'storeName': resolvedStoreName,
         'cashierUid': user.uid,
         'status': 'success',
         'createdAt': FieldValue.serverTimestamp(),
@@ -784,6 +895,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         'total': total,
         'amountReceived': amountReceived,
         'change': change,
+        'publicReceiptUrl': publicReceiptUrl,
         'items': items,
       });
 
@@ -805,14 +917,71 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       await batch.commit();
 
+      await _savePublicReceipt(
+        storeId: storeId,
+        transactionId: txRef.id,
+        invoiceNo: invoiceNo,
+        cashierUid: user.uid,
+        paymentMode: paymentMode,
+        subtotal: total,
+        taxableSales: total,
+        taxEnabled: false,
+        taxName: 'VAT',
+        taxRate: 12.0,
+        taxInclusive: true,
+        tax: 0.0,
+        grandTotal: total,
+        amountReceived: amountReceived,
+        change: change,
+        items: items,
+        storeName: resolvedStoreName,
+        now: now,
+      );
+
+      final receipt = ReceiptData(
+        invoiceId: txRef.id,
+        invoiceNo: invoiceNo,
+        storeName: resolvedStoreName,
+        dateTime: now,
+        paymentMode: paymentMode,
+        cashierUid: user.uid,
+        subtotal: total,
+        taxableSales: total,
+        taxEnabled: false,
+        taxName: 'VAT',
+        taxRate: 12.0,
+        taxInclusive: true,
+        tax: 0.0,
+        grandTotal: total,
+        amountReceived: amountReceived,
+        change: change,
+        items: items.map((item) {
+          return ReceiptLine(
+            name: (item['name'] ?? '').toString(),
+            price: _toDouble(item['price']),
+            qty: _toInt(item['qty']),
+          );
+        }).toList(),
+      );
+
       if (!mounted) return;
+
       setState(() {
         _savingTransaction = false;
         _cartItems.clear();
+        _liveSuggestions = [];
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Transaction saved successfully.')),
+      _searchController.clear();
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReceiptScreen(
+            data: receipt,
+            receiptUrl: publicReceiptUrl,
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -1118,53 +1287,101 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Widget _buildSearchRow() {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: TextField(
-            controller: _searchController,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _searchAndPickItem(),
-            decoration: InputDecoration(
-              hintText: 'Search item name...',
-              filled: true,
-              fillColor: Colors.white,
-              prefixIcon: const Icon(Icons.search_rounded),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        SizedBox(
-          height: 54,
-          child: ElevatedButton(
-            onPressed: _searchingItems ? null : _searchAndPickItem,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _teal,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                onChanged: _updateLiveSuggestions,
+                onSubmitted: (_) => _searchAndPickItem(),
+                decoration: InputDecoration(
+                  hintText: 'Search item name.',
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                ),
               ),
             ),
-            child: _searchingItems
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('Add Item'),
-          ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 54,
+              child: ElevatedButton(
+                onPressed: _searchingItems ? null : _searchAndPickItem,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _teal,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                child: _searchingItems
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('Add Item'),
+              ),
+            ),
+          ],
         ),
+        if (_liveSuggestions.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _liveSuggestions.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final doc = _liveSuggestions[index];
+                final data = doc.data() ?? {};
+                final name = _extractItemName(data);
+                final category = _extractItemCategory(data);
+                final price = _extractPrice(data);
+                final stock = _extractStock(data);
+
+                return ListTile(
+                  title: Text(name),
+                  subtitle: Text(
+                    '${category.isEmpty ? 'Uncategorized' : category} • Stock: $stock • ₱${price.toStringAsFixed(2)}',
+                  ),
+                  onTap: () {
+                    _addItemDocumentToCart(doc);
+                    _searchController.clear();
+                    setState(() => _liveSuggestions = []);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ],
     );
   }
