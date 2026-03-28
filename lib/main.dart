@@ -1,6 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:device_preview/device_preview.dart';
 
 import 'firebase/firebase_options.dart';
@@ -10,11 +10,19 @@ import 'screens/transaction/public_receipt_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  print("Firebase apps count: ${Firebase.apps.length}");
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      debugPrint('Firebase initialized');
+    } else {
+      debugPrint('Firebase already initialized: ${Firebase.apps.first.name}');
+    }
+  } catch (e, stackTrace) {
+    debugPrint('Firebase init error: $e');
+    debugPrintStack(stackTrace: stackTrace);
+  }
 
   runApp(
     DevicePreview(
