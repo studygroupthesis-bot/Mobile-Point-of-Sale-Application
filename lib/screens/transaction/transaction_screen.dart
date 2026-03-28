@@ -340,7 +340,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
     required String storeId,
     required String transactionId,
   }) {
-    return 'posapp://receipt?storeId=$storeId&transactionId=$transactionId';
+    return 'https://fir-pos-system.web.app/#/public-receipt'
+        '?storeId=$storeId&transactionId=$transactionId';
   }
 
   Future<void> _savePublicReceipt({
@@ -691,8 +692,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
         return;
       }
 
-      final picked = await showModalBottomSheet<
-          DocumentSnapshot<Map<String, dynamic>>>(
+      final picked =
+          await showModalBottomSheet<DocumentSnapshot<Map<String, dynamic>>>(
         context: context,
         isScrollControlled: true,
         builder: (context) {
@@ -903,8 +904,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
         final itemId = (item['itemId'] ?? '').toString().trim();
         if (itemId.isEmpty) continue;
 
-        final itemRef =
-            db.collection('stores').doc(storeId).collection('items').doc(itemId);
+        final itemRef = db
+            .collection('stores')
+            .doc(storeId)
+            .collection('items')
+            .doc(itemId);
         final purchasedQty = _toInt(item['qty']);
         final currentStock = _toInt(item['availableStock']);
         final updatedStock = (currentStock - purchasedQty).clamp(0, 1 << 30);
@@ -1121,7 +1125,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       onPressed: () {
                         final total = _cartTotal;
                         final amountReceived =
-                            double.tryParse(amountController.text.trim()) ?? 0.0;
+                            double.tryParse(amountController.text.trim()) ??
+                                0.0;
 
                         if (amountReceived <= 0) {
                           ScaffoldMessenger.of(sheetContext).showSnackBar(
