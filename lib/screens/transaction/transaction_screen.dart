@@ -345,7 +345,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Future<void> _savePublicReceipt({
-    required String storeId,
+    required String storeId,  
     required String transactionId,
     required String invoiceNo,
     required String cashierUid,

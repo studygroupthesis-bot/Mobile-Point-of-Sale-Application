@@ -2,13 +2,19 @@ import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:device_preview/device_preview.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 
 import 'firebase/firebase_options.dart';
 import 'screens/auth/intro_screen.dart';
+import 'screens/auth/reset_password_screen.dart';
 import 'screens/transaction/public_receipt_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb) {
+    usePathUrlStrategy();
+  }
 
   try {
     if (Firebase.apps.isEmpty) {
@@ -35,82 +41,59 @@ Future<void> main() async {
 class PopPayRoot extends StatelessWidget {
   const PopPayRoot({super.key});
 
-  Map<String, String?> _extractPublicReceiptParamsFromUrl() {
-    if (!kIsWeb) {
-      return {
-        'storeId': null,
-        'transactionId': null,
-      };
-    }
-
-    final directStoreId = Uri.base.queryParameters['storeId']?.trim();
-    final directTransactionId =
-        Uri.base.queryParameters['transactionId']?.trim();
-
-    if ((directStoreId?.isNotEmpty ?? false) &&
-        (directTransactionId?.isNotEmpty ?? false)) {
-      return {
-        'storeId': directStoreId,
-        'transactionId': directTransactionId,
-      };
-    }
-
-    final fragment = Uri.base.fragment.trim();
-    if (fragment.isEmpty) {
-      return {
-        'storeId': null,
-        'transactionId': null,
-      };
-    }
-
-    final normalized = fragment.startsWith('/') ? fragment : '/$fragment';
-    final uri = Uri.tryParse(normalized);
-
-    final path = uri?.path ?? '';
-    if (!path.startsWith('/public-receipt')) {
-      return {
-        'storeId': null,
-        'transactionId': null,
-      };
-    }
-
-    final storeId = uri?.queryParameters['storeId']?.trim();
-    final transactionId = uri?.queryParameters['transactionId']?.trim();
-
-    return {
-      'storeId': (storeId != null && storeId.isNotEmpty) ? storeId : null,
-      'transactionId': (transactionId != null && transactionId.isNotEmpty)
-          ? transactionId
-          : null,
-    };
-  }
-
-  Widget _resolveHome() {
-    final params = _extractPublicReceiptParamsFromUrl();
-    final storeId = params['storeId'];
-    final transactionId = params['transactionId'];
-
-    if (storeId != null && transactionId != null) {
-      return PublicReceiptScreen(
-        storeId: storeId,
-        transactionId: transactionId,
-      );
-    }
-
-    return const IntroScreen();
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      useInheritedMediaQuery: true,
       builder: DevicePreview.appBuilder,
       locale: DevicePreview.locale(context),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         fontFamily: 'Inter',
       ),
-      home: _resolveHome(),
+      onGenerateRoute: (settings) {
+        final uri = Uri.base;
+
+        debugPrint('Uri.base = $uri');
+        debugPrint('Uri.base.path = ${uri.path}');
+        debugPrint('Uri.base.queryParameters = ${uri.queryParameters}');
+
+        if (uri.path == '/public-receipt') {
+          final storeId = uri.queryParameters['storeId']?.trim();
+          final transactionId = uri.queryParameters['transactionId']?.trim();
+
+          if ((storeId?.isNotEmpty ?? false) &&
+              (transactionId?.isNotEmpty ?? false)) {
+            return MaterialPageRoute(
+              builder: (_) => PublicReceiptScreen(
+                storeId: storeId!,
+                transactionId: transactionId!,
+              ),
+              settings: const RouteSettings(name: '/public-receipt'),
+            );
+          }
+        }
+
+        if (uri.path == '/reset-password') {
+          final oobCode = uri.queryParameters['oobCode']?.trim();
+          final email = uri.queryParameters['email']?.trim();
+
+          if (oobCode != null && oobCode.isNotEmpty) {
+            return MaterialPageRoute(
+              builder: (_) => ResetPasswordScreen(
+                oobCode: oobCode,
+                email: email,
+              ),
+              settings: const RouteSettings(name: '/reset-password'),
+            );
+          }
+        }
+
+        return MaterialPageRoute(
+          builder: (_) => const IntroScreen(),
+          settings: const RouteSettings(name: '/'),
+        );
+      },
+      initialRoute: '/',
     );
   }
 }

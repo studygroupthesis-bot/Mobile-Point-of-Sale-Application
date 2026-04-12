@@ -144,78 +144,83 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7CBD0),
+      backgroundColor: const Color(0xFFDFF3EF),
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        color: const Color(0xFFF7CBD0),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -90,
-              left: -90,
-              child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF9DE5DB).withOpacity(0.35),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF9DE5DB).withOpacity(0.35),
-                      blurRadius: 90,
-                      spreadRadius: 20,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFDFF3EF),
+              Color(0xFFCDEAE5),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: FutureBuilder<bool>(
+            future: _isAdminFuture,
+            builder: (context, adminSnap) {
+              if (adminSnap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (adminSnap.data != true) {
+                return Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF6F8F8),
+                      borderRadius: BorderRadius.circular(28),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              right: -80,
-              bottom: 90,
-              child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF9DE5DB).withOpacity(0.25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF9DE5DB).withOpacity(0.25),
-                      blurRadius: 90,
-                      spreadRadius: 20,
+                    child: Center(
+                      child: Container(
+                        margin: const EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.96),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Text(
+                          'Admin only.\nYou do not have permission to view Stock Logs.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            SafeArea(
-              child: FutureBuilder<bool>(
-                future: _isAdminFuture,
-                builder: (context, adminSnap) {
-                  if (adminSnap.connectionState == ConnectionState.waiting) {
+                  ),
+                );
+              }
+
+              return FutureBuilder<String>(
+                future: _storeIdFuture,
+                builder: (context, storeSnap) {
+                  if (storeSnap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  if (adminSnap.data != true) {
+                  if (storeSnap.hasError || !storeSnap.hasData) {
                     return Padding(
                       padding: const EdgeInsets.all(18),
                       child: Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFDDF3EF),
+                          color: const Color(0xFFF6F8F8),
                           borderRadius: BorderRadius.circular(28),
                         ),
                         child: Center(
-                          child: Container(
-                            margin: const EdgeInsets.all(20),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.92),
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: const Text(
-                              'Admin only.\nYou do not have permission to view Stock Logs.',
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Text(
+                              'Failed to load store.\n${storeSnap.error ?? ''}',
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -224,515 +229,388 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                     );
                   }
 
-                  return FutureBuilder<String>(
-                    future: _storeIdFuture,
-                    builder: (context, storeSnap) {
-                      if (storeSnap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
+                  final storeId = storeSnap.data!;
 
-                      if (storeSnap.hasError || !storeSnap.hasData) {
-                        return Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFDDF3EF),
-                              borderRadius: BorderRadius.circular(28),
-                            ),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: Text(
-                                  'Failed to load store.\n${storeSnap.error ?? ''}',
-                                  textAlign: TextAlign.center,
+                  final logsStream = FirebaseFirestore.instance
+                      .collection('stores')
+                      .doc(storeId)
+                      .collection('stock_logs')
+                      .orderBy('created_at', descending: true)
+                      .limit(300)
+                      .snapshots();
+
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(28),
+                        color: const Color(0xFFF6F8F8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 16,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(20),
+                                    onTap: () => Navigator.pop(context),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(8),
+                                      child: Icon(
+                                        Icons.arrow_back_ios_new,
+                                        size: 22,
+                                        color: Color(0xFF4C4C4C),
+                                      ),
+                                    ),
+                                  ),
+                                  const Expanded(
+                                    child: Text(
+                                      'Stock Logs',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF2D2D2D),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 38),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(26),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x18000000),
+                                      blurRadius: 10,
+                                      offset: Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: TextField(
+                                  controller: _search,
+                                  onChanged: (v) =>
+                                      setState(() => _q = v.trim()),
+                                  decoration: InputDecoration(
+                                    hintText:
+                                        'Search product / code / encoder...',
+                                    hintStyle: const TextStyle(
+                                      color: Color(0xFF757575),
+                                      fontSize: 14,
+                                    ),
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.transparent,
+                                    prefixIcon: const Icon(
+                                      Icons.search,
+                                      color: Color(0xFF6E6E6E),
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(26),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(26),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(26),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 14,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                        );
-                      }
+                              const SizedBox(height: 12),
+                              Expanded(
+                                child: StreamBuilder<
+                                    QuerySnapshot<Map<String, dynamic>>>(
+                                  stream: logsStream,
+                                  builder: (context, snap) {
+                                    if (snap.connectionState ==
+                                        ConnectionState.waiting) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(),
+                                      );
+                                    }
 
-                      final storeId = storeSnap.data!;
+                                    if (snap.hasError) {
+                                      return Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Text(
+                                            'Failed to load stock logs.\n${snap.error}',
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      );
+                                    }
 
-                      final logsStream = FirebaseFirestore.instance
-                          .collection('stores')
-                          .doc(storeId)
-                          .collection('stock_logs')
-                          .orderBy('created_at', descending: true)
-                          .limit(300)
-                          .snapshots();
+                                    final docs = snap.data?.docs ?? [];
 
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-                        child: Container(
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(28),
-                            color: const Color(0xFFDDF3EF).withOpacity(0.92),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 14,
-                                offset: const Offset(0, 4),
+                                    final filtered = _q.isEmpty
+                                        ? docs
+                                        : docs.where((doc) {
+                                            final d = doc.data();
+                                            final haystack = [
+                                              _readString(d, ['itemName']),
+                                              _readString(d, ['stockInCode']),
+                                              _readString(d, ['batchCode']),
+                                              _readString(
+                                                  d, ['encodedByName']),
+                                              _readString(
+                                                  d, ['encodedByEmail']),
+                                              _readString(d, ['type']),
+                                            ].join(' ').toLowerCase();
+
+                                            return haystack.contains(
+                                              _q.toLowerCase(),
+                                            );
+                                          }).toList();
+
+                                    if (filtered.isEmpty) {
+                                      return const Center(
+                                        child: Text(
+                                          'No stock logs found.',
+                                          style: TextStyle(
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    return ListView.separated(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 16,
+                                      ),
+                                      itemCount: filtered.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 10),
+                                      itemBuilder: (context, index) {
+                                        final d = filtered[index].data();
+
+                                        final itemName = _readString(
+                                          d,
+                                          ['itemName'],
+                                          fallback: 'Unnamed Item',
+                                        );
+                                        final type = _readString(
+                                          d,
+                                          ['type'],
+                                          fallback: 'unknown',
+                                        );
+                                        final quantity = _readInt(
+                                          d,
+                                          ['quantity'],
+                                        );
+                                        final stockBefore = _readInt(
+                                          d,
+                                          ['stockBefore'],
+                                        );
+                                        final stockAfter = _readInt(
+                                          d,
+                                          ['stockAfter'],
+                                        );
+                                        final costPrice = _readDouble(
+                                          d,
+                                          ['costPrice', 'cost'],
+                                        );
+                                        final stockInCode = _readString(
+                                          d,
+                                          ['stockInCode'],
+                                        );
+                                        final batchCode = _readString(
+                                          d,
+                                          ['batchCode'],
+                                        );
+                                        final encodedByName = _readString(
+                                          d,
+                                          ['encodedByName'],
+                                        );
+                                        final encodedByEmail = _readString(
+                                          d,
+                                          ['encodedByEmail'],
+                                        );
+                                        final receivedDate = _readDate(
+                                          d,
+                                          ['receivedDate'],
+                                        );
+                                        final expiryDate = _readDate(
+                                          d,
+                                          ['expiryDate'],
+                                        );
+                                        final createdAt = _readDate(
+                                          d,
+                                          ['created_at'],
+                                        );
+                                        final notes = _readString(
+                                          d,
+                                          ['notes'],
+                                        );
+
+                                        final chipColor = _typeColor(type);
+
+                                        return Container(
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.06),
+                                                blurRadius: 10,
+                                                offset: const Offset(0, 3),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      itemName,
+                                                      style: const TextStyle(
+                                                        fontSize: 15,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color:
+                                                            Color(0xFF2F2F2F),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 11,
+                                                      vertical: 6,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: chipColor,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              16),
+                                                    ),
+                                                    child: Text(
+                                                      type
+                                                          .replaceAll('_', ' ')
+                                                          .toLowerCase(),
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 11,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 8,
+                                                children: [
+                                                  _miniInfo('Qty', '$quantity'),
+                                                  _miniInfo(
+                                                      'Before', '$stockBefore'),
+                                                  _miniInfo(
+                                                      'After', '$stockAfter'),
+                                                  _miniInfo('Cost',
+                                                      _money(costPrice)),
+                                                  _miniInfo('Received',
+                                                      _fmtDate(receivedDate)),
+                                                  _miniInfo('Expiry',
+                                                      _fmtDate(expiryDate)),
+                                                  _miniInfo('Encoded',
+                                                      _fmtTime(createdAt)),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 10),
+                                              if (stockInCode.isNotEmpty)
+                                                Text(
+                                                  'Stock In Code: $stockInCode',
+                                                  style: const TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              if (batchCode.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 2),
+                                                  child: Text(
+                                                    'Batch Code: $batchCode',
+                                                    style: const TextStyle(
+                                                      fontSize: 12.5,
+                                                    ),
+                                                  ),
+                                                ),
+                                              if (encodedByName.isNotEmpty ||
+                                                  encodedByEmail.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 2),
+                                                  child: Text(
+                                                    'Encoded by: ${encodedByName.isEmpty ? '-' : encodedByName}${encodedByEmail.isEmpty ? '' : ' • $encodedByEmail'}',
+                                                    style: const TextStyle(
+                                                      fontSize: 12.5,
+                                                    ),
+                                                  ),
+                                                ),
+                                              if (notes.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 6),
+                                                  child: Text(
+                                                    'Notes: $notes',
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.black54,
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
                               ),
                             ],
                           ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(28),
-                            child: Stack(
-                              children: [
-                                Positioned(
-                                  top: -70,
-                                  left: -70,
-                                  child: Container(
-                                    width: 200,
-                                    height: 200,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFF9DE5DB)
-                                          .withOpacity(0.18),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF9DE5DB)
-                                              .withOpacity(0.18),
-                                          blurRadius: 70,
-                                          spreadRadius: 18,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: -90,
-                                  bottom: 40,
-                                  child: Container(
-                                    width: 230,
-                                    height: 230,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFF9DE5DB)
-                                          .withOpacity(0.14),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF9DE5DB)
-                                              .withOpacity(0.14),
-                                          blurRadius: 80,
-                                          spreadRadius: 20,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          InkWell(
-                                            borderRadius:
-                                                BorderRadius.circular(20),
-                                            onTap: () => Navigator.pop(context),
-                                            child: const Padding(
-                                              padding: EdgeInsets.all(8),
-                                              child: Icon(
-                                                Icons.arrow_back_ios_new,
-                                                size: 22,
-                                                color: Color(0xFF4C4C4C),
-                                              ),
-                                            ),
-                                          ),
-                                          const Expanded(
-                                            child: Text(
-                                              'Stock Logs',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.w800,
-                                                color: Color(0xFF2D2D2D),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 38),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.85),
-                                          borderRadius:
-                                              BorderRadius.circular(26),
-                                        ),
-                                        child: TextField(
-                                          controller: _search,
-                                          onChanged: (v) =>
-                                              setState(() => _q = v.trim()),
-                                          decoration: InputDecoration(
-                                            hintText:
-                                                'Search product / code / encoder...',
-                                            hintStyle: const TextStyle(
-                                              color: Color(0xFF757575),
-                                              fontSize: 14,
-                                            ),
-                                            isDense: true,
-                                            filled: true,
-                                            fillColor: Colors.transparent,
-                                            prefixIcon: const Icon(
-                                              Icons.search,
-                                              color: Color(0xFF6E6E6E),
-                                            ),
-                                            border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(26),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(26),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(26),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                              horizontal: 14,
-                                              vertical: 14,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Expanded(
-                                        child: StreamBuilder<
-                                            QuerySnapshot<
-                                                Map<String, dynamic>>>(
-                                          stream: logsStream,
-                                          builder: (context, snap) {
-                                            if (snap.connectionState ==
-                                                ConnectionState.waiting) {
-                                              return const Center(
-                                                child:
-                                                    CircularProgressIndicator(),
-                                              );
-                                            }
-
-                                            if (snap.hasError) {
-                                              return Center(
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.all(20),
-                                                  child: Text(
-                                                    'Failed to load stock logs.\n${snap.error}',
-                                                    textAlign: TextAlign.center,
-                                                  ),
-                                                ),
-                                              );
-                                            }
-
-                                            final docs = snap.data?.docs ?? [];
-
-                                            final filtered = _q.isEmpty
-                                                ? docs
-                                                : docs.where((doc) {
-                                                    final d = doc.data();
-                                                    final haystack = [
-                                                      _readString(
-                                                          d, ['itemName']),
-                                                      _readString(
-                                                          d, ['stockInCode']),
-                                                      _readString(
-                                                          d, ['batchCode']),
-                                                      _readString(d, [
-                                                        'encodedByName'
-                                                      ]),
-                                                      _readString(d, [
-                                                        'encodedByEmail'
-                                                      ]),
-                                                      _readString(d, ['type']),
-                                                    ].join(' ').toLowerCase();
-
-                                                    return haystack.contains(
-                                                      _q.toLowerCase(),
-                                                    );
-                                                  }).toList();
-
-                                            if (filtered.isEmpty) {
-                                              return const Center(
-                                                child: Text(
-                                                  'No stock logs found.',
-                                                  style: TextStyle(
-                                                    color: Colors.black54,
-                                                  ),
-                                                ),
-                                              );
-                                            }
-
-                                            return ListView.separated(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 16,
-                                              ),
-                                              itemCount: filtered.length,
-                                              separatorBuilder: (_, __) =>
-                                                  const SizedBox(height: 10),
-                                              itemBuilder: (context, index) {
-                                                final d =
-                                                    filtered[index].data();
-
-                                                final itemName = _readString(
-                                                  d,
-                                                  ['itemName'],
-                                                  fallback: 'Unnamed Item',
-                                                );
-                                                final type = _readString(
-                                                  d,
-                                                  ['type'],
-                                                  fallback: 'unknown',
-                                                );
-                                                final quantity = _readInt(
-                                                  d,
-                                                  ['quantity'],
-                                                );
-                                                final stockBefore = _readInt(
-                                                  d,
-                                                  ['stockBefore'],
-                                                );
-                                                final stockAfter = _readInt(
-                                                  d,
-                                                  ['stockAfter'],
-                                                );
-                                                final costPrice = _readDouble(
-                                                  d,
-                                                  ['costPrice', 'cost'],
-                                                );
-                                                final stockInCode = _readString(
-                                                  d,
-                                                  ['stockInCode'],
-                                                );
-                                                final batchCode = _readString(
-                                                  d,
-                                                  ['batchCode'],
-                                                );
-                                                final encodedByName =
-                                                    _readString(
-                                                  d,
-                                                  ['encodedByName'],
-                                                );
-                                                final encodedByEmail =
-                                                    _readString(
-                                                  d,
-                                                  ['encodedByEmail'],
-                                                );
-                                                final receivedDate = _readDate(
-                                                  d,
-                                                  ['receivedDate'],
-                                                );
-                                                final expiryDate = _readDate(
-                                                  d,
-                                                  ['expiryDate'],
-                                                );
-                                                final createdAt = _readDate(
-                                                  d,
-                                                  ['created_at'],
-                                                );
-                                                final notes = _readString(
-                                                  d,
-                                                  ['notes'],
-                                                );
-
-                                                final chipColor =
-                                                    _typeColor(type);
-
-                                                return Container(
-                                                  padding:
-                                                      const EdgeInsets.all(12),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white
-                                                        .withOpacity(0.94),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            16),
-                                                    boxShadow: [
-                                                      BoxShadow(
-                                                        color: Colors.black
-                                                            .withOpacity(0.06),
-                                                        blurRadius: 10,
-                                                        offset:
-                                                            const Offset(0, 3),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment.start,
-                                                    children: [
-                                                      Row(
-                                                        children: [
-                                                          Expanded(
-                                                            child: Text(
-                                                              itemName,
-                                                              style:
-                                                                  const TextStyle(
-                                                                fontSize: 15,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                                color: Color(
-                                                                    0xFF2F2F2F),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          Container(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                              horizontal: 11,
-                                                              vertical: 6,
-                                                            ),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color: chipColor,
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          16),
-                                                            ),
-                                                            child: Text(
-                                                              type
-                                                                  .replaceAll(
-                                                                      '_', ' ')
-                                                                  .toLowerCase(),
-                                                              style:
-                                                                  const TextStyle(
-                                                                color: Colors
-                                                                    .white,
-                                                                fontSize: 11,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      const SizedBox(height: 8),
-                                                      Wrap(
-                                                        spacing: 8,
-                                                        runSpacing: 8,
-                                                        children: [
-                                                          _miniInfo(
-                                                            'Qty',
-                                                            '$quantity',
-                                                          ),
-                                                          _miniInfo(
-                                                            'Before',
-                                                            '$stockBefore',
-                                                          ),
-                                                          _miniInfo(
-                                                            'After',
-                                                            '$stockAfter',
-                                                          ),
-                                                          _miniInfo(
-                                                            'Cost',
-                                                            _money(costPrice),
-                                                          ),
-                                                          _miniInfo(
-                                                            'Received',
-                                                            _fmtDate(
-                                                                receivedDate),
-                                                          ),
-                                                          _miniInfo(
-                                                            'Expiry',
-                                                            _fmtDate(
-                                                                expiryDate),
-                                                          ),
-                                                          _miniInfo(
-                                                            'Encoded',
-                                                            _fmtTime(createdAt),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      const SizedBox(height: 10),
-                                                      if (stockInCode.isNotEmpty)
-                                                        Text(
-                                                          'Stock In Code: $stockInCode',
-                                                          style:
-                                                              const TextStyle(
-                                                            fontSize: 12.5,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                          ),
-                                                        ),
-                                                      if (batchCode.isNotEmpty)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(top: 2),
-                                                          child: Text(
-                                                            'Batch Code: $batchCode',
-                                                            style:
-                                                                const TextStyle(
-                                                              fontSize: 12.5,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      if (encodedByName
-                                                              .isNotEmpty ||
-                                                          encodedByEmail
-                                                              .isNotEmpty)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(top: 2),
-                                                          child: Text(
-                                                            'Encoded by: ${encodedByName.isEmpty ? '-' : encodedByName}${encodedByEmail.isEmpty ? '' : ' • $encodedByEmail'}',
-                                                            style:
-                                                                const TextStyle(
-                                                              fontSize: 12.5,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      if (notes.isNotEmpty)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(top: 6),
-                                                          child: Text(
-                                                            'Notes: $notes',
-                                                            style:
-                                                                const TextStyle(
-                                                              fontSize: 12,
-                                                              color: Colors
-                                                                  .black54,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                         ),
-                      );
-                    },
+                      ),
+                    ),
                   );
                 },
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );

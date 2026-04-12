@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class PublicReceiptScreen extends StatelessWidget {
   final String storeId;
@@ -26,6 +27,13 @@ class PublicReceiptScreen extends StatelessWidget {
     return '₱${_toDouble(value).toStringAsFixed(2)}';
   }
 
+  String _formatDate(dynamic value) {
+    if (value is Timestamp) {
+      return DateFormat('MMM dd, yyyy • hh:mm a').format(value.toDate());
+    }
+    return '-';
+  }
+
   @override
   Widget build(BuildContext context) {
     final stream = FirebaseFirestore.instance
@@ -48,12 +56,24 @@ class PublicReceiptScreen extends StatelessWidget {
           }
 
           if (snap.hasError) {
-            return Center(child: Text('Error: ${snap.error}'));
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Error: ${snap.error}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
           }
 
           final data = snap.data?.data();
           if (data == null) {
             return const Center(child: Text('Receipt not found.'));
+          }
+
+          if (data['isActive'] != true) {
+            return const Center(child: Text('Receipt is not active.'));
           }
 
           final items = (data['items'] as List?) ?? const [];
@@ -63,14 +83,18 @@ class PublicReceiptScreen extends StatelessWidget {
                   .toString();
 
           final subtotal = _toDouble(data['subtotal']);
+          final taxableSales = _toDouble(data['taxableSales'] ?? subtotal);
           final tax = _toDouble(data['tax']);
-          final total = _toDouble(data['total'] ?? data['grandTotal']);
-          final amountPaid = _toDouble(data['amountPaid']);
+          final total = _toDouble(data['grandTotal'] ?? data['total']);
+          final amountReceived =
+              _toDouble(data['amountReceived'] ?? data['amountPaid']);
           final change = _toDouble(data['change']);
           final paymentMethod =
               (data['paymentMethod'] ?? data['paymentMode'] ?? 'Cash')
                   .toString();
-          final cashierName = (data['cashierName'] ?? '-').toString();
+          final cashierName =
+              (data['cashierName'] ?? data['cashierUid'] ?? '-').toString();
+          final createdAt = _formatDate(data['createdAt']);
 
           return SafeArea(
             child: SingleChildScrollView(
@@ -104,6 +128,11 @@ class PublicReceiptScreen extends StatelessWidget {
                                   'Receipt #$receiptNumber',
                                   style: const TextStyle(fontSize: 14),
                                 ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  createdAt,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
                               ],
                             ),
                           ),
@@ -122,8 +151,10 @@ class PublicReceiptScreen extends StatelessWidget {
                             final map = Map<String, dynamic>.from(item as Map);
                             final name = (map['name'] ?? 'Item').toString();
                             final qty = _toInt(map['qty']);
-                            final price = _toDouble(map['price']);
-                            final lineTotal = _toDouble(map['total']);
+                            final unitPrice = _toDouble(map['price']);
+                            final lineTotal = _toDouble(
+                              map['total'] ?? (unitPrice * qty),
+                            );
 
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 10),
@@ -137,7 +168,7 @@ class PublicReceiptScreen extends StatelessWidget {
                                     ),
                                   ),
                                   Text(
-                                    '₱${price.toStringAsFixed(2)}',
+                                    '₱${unitPrice.toStringAsFixed(2)}',
                                     style: const TextStyle(fontSize: 14),
                                   ),
                                   const SizedBox(width: 12),
@@ -151,18 +182,19 @@ class PublicReceiptScreen extends StatelessWidget {
                                 ],
                               ),
                             );
-                          }),
+                          }).toList(),
                           const SizedBox(height: 8),
                           const Divider(),
                           const SizedBox(height: 8),
                           _summaryRow('Subtotal', _peso(subtotal)),
+                          _summaryRow('Taxable Sales', _peso(taxableSales)),
                           _summaryRow(
                             (data['taxName'] ?? 'Tax').toString(),
                             _peso(tax),
                           ),
-                          _summaryRow('Total', _peso(total), bold: true),
+                          _summaryRow('Grand Total', _peso(total), bold: true),
                           const SizedBox(height: 8),
-                          _summaryRow('Amount Paid', _peso(amountPaid)),
+                          _summaryRow('Amount Received', _peso(amountReceived)),
                           _summaryRow('Change', _peso(change)),
                           const SizedBox(height: 12),
                           Text(

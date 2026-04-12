@@ -176,232 +176,258 @@ class _ProductBatchDetailsScreenState extends State<ProductBatchDetailsScreen> {
         .snapshots();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFD78383),
+      backgroundColor: const Color(0xFFDFF3EF),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFD78383),
+        backgroundColor: const Color(0xFFDFF3EF),
         elevation: 0,
         centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.black),
         title: const Text(
           'Product Batch Details',
           style: TextStyle(
-            color: Colors.white,
+            color: Colors.black,
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
-      body: SafeArea(
-        child: Container(
-          margin: const EdgeInsets.all(8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE6E6E6),
-            borderRadius: BorderRadius.circular(18),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFDFF3EF),
+              Color(0xFFCDEAE5),
+            ],
           ),
-          child: Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD8F0EC),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.productName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'This shows the stock-in history of the selected product by batch code, date received, and expiry date.',
-                      style: TextStyle(
-                        color: Colors.grey.shade700,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF6F8F8),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: stream,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    if (snapshot.hasError) {
-                      return Center(
-                        child: Text(
-                          'Firestore error:\n${snapshot.error}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      );
-                    }
-
-                    final docs = snapshot.data?.docs ?? [];
-
-                    if (docs.isEmpty) {
-                      return const Center(
-                        child: Text('No batch records found.'),
-                      );
-                    }
-
-                    return ListView.separated(
-                      itemCount: docs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final data = docs[index].data();
-
-                        final batchCode = _readString(
-                          data,
-                          ['batchCode'],
-                          fallback: 'Batch ${index + 1}',
-                        );
-
-                        final stockInCode = _readString(data, ['stockInCode']);
-                        final receivedDate =
-                            _readDate(data, ['receivedDate', 'created_at']);
-                        final expiryDate = _readDate(data, ['expiryDate']);
-                        final qtyAdded = _readInt(
-                          data,
-                          ['quantity', 'qtyAdded', 'quantityAdded'],
-                        );
-
-                        // Since you are using stock_logs as the source,
-                        // remaining quantity is not directly tracked here.
-                        // So we use quantity as the display quantity for now.
-                        final qtyRemaining = _readInt(
-                          data,
-                          ['remainingQty', 'qtyRemaining', 'quantity'],
-                          fallback: qtyAdded,
-                        );
-
-                        final cost = _readDouble(
-                          data,
-                          ['costPrice', 'cost', 'unitCost'],
-                        );
-
-                        final encodedByName =
-                            _readString(data, ['encodedByName']);
-                        final encodedByEmail =
-                            _readString(data, ['encodedByEmail']);
-                        final notes = _readString(data, ['notes']);
-
-                        final status = _statusLabel(expiryDate, qtyRemaining);
-
-                        return Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 4,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
+              child: Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD8F0EC),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.productName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      batchCode,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 5,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _statusColor(status),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      status,
-                                      style: TextStyle(
-                                        color: _statusTextColor(status),
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 11,
-                                      ),
-                                    ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'This shows the stock-in history of the selected product by batch code, date received, and expiry date.',
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: stream,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text(
+                              'Firestore error:\n${snapshot.error}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                          );
+                        }
+
+                        final docs = snapshot.data?.docs ?? [];
+
+                        if (docs.isEmpty) {
+                          return const Center(
+                            child: Text('No batch records found.'),
+                          );
+                        }
+
+                        return ListView.separated(
+                          itemCount: docs.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final data = docs[index].data();
+
+                            final batchCode = _readString(
+                              data,
+                              ['batchCode'],
+                              fallback: 'Batch ${index + 1}',
+                            );
+
+                            final stockInCode = _readString(data, ['stockInCode']);
+                            final receivedDate =
+                                _readDate(data, ['receivedDate', 'created_at']);
+                            final expiryDate = _readDate(data, ['expiryDate']);
+                            final qtyAdded = _readInt(
+                              data,
+                              ['quantity', 'qtyAdded', 'quantityAdded'],
+                            );
+
+                            final qtyRemaining = _readInt(
+                              data,
+                              ['remainingQty', 'qtyRemaining', 'quantity'],
+                              fallback: qtyAdded,
+                            );
+
+                            final cost = _readDouble(
+                              data,
+                              ['costPrice', 'cost', 'unitCost'],
+                            );
+
+                            final encodedByName =
+                                _readString(data, ['encodedByName']);
+                            final encodedByEmail =
+                                _readString(data, ['encodedByEmail']);
+                            final notes = _readString(data, ['notes']);
+
+                            final status = _statusLabel(expiryDate, qtyRemaining);
+
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x18000000),
+                                    blurRadius: 8,
+                                    offset: Offset(0, 3),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
-                              if (stockInCode.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    'Stock In Code: $stockInCode',
-                                    style: TextStyle(
-                                      color: Colors.grey.shade700,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          batchCode,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _statusColor(status),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: Text(
+                                          status,
+                                          style: TextStyle(
+                                            color: _statusTextColor(status),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              _infoRow(
-                                label: 'Received Date',
-                                value: _formatDate(receivedDate),
+                                  const SizedBox(height: 10),
+                                  if (stockInCode.isNotEmpty)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 10),
+                                      child: Text(
+                                        'Stock In Code: $stockInCode',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade700,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  _infoRow(
+                                    label: 'Received Date',
+                                    value: _formatDate(receivedDate),
+                                  ),
+                                  _infoRow(
+                                    label: 'Expiry Date',
+                                    value: _formatDate(expiryDate),
+                                  ),
+                                  _infoRow(
+                                    label: 'Qty Added',
+                                    value: qtyAdded.toString(),
+                                  ),
+                                  _infoRow(
+                                    label: 'Qty Remaining',
+                                    value: qtyRemaining.toString(),
+                                  ),
+                                  _infoRow(
+                                    label: 'Unit Cost',
+                                    value: _money(cost),
+                                  ),
+                                  _infoRow(
+                                    label: 'Encoded By',
+                                    value: encodedByName.isNotEmpty
+                                        ? encodedByName
+                                        : '-',
+                                  ),
+                                  if (encodedByEmail.isNotEmpty)
+                                    _infoRow(
+                                      label: 'Encoder Email',
+                                      value: encodedByEmail,
+                                    ),
+                                  if (notes.isNotEmpty)
+                                    _infoRow(
+                                      label: 'Notes',
+                                      value: notes,
+                                    ),
+                                ],
                               ),
-                              _infoRow(
-                                label: 'Expiry Date',
-                                value: _formatDate(expiryDate),
-                              ),
-                              _infoRow(
-                                label: 'Qty Added',
-                                value: qtyAdded.toString(),
-                              ),
-                              _infoRow(
-                                label: 'Qty Remaining',
-                                value: qtyRemaining.toString(),
-                              ),
-                              _infoRow(
-                                label: 'Unit Cost',
-                                value: _money(cost),
-                              ),
-                              _infoRow(
-                                label: 'Encoded By',
-                                value: encodedByName.isNotEmpty
-                                    ? encodedByName
-                                    : '-',
-                              ),
-                              if (encodedByEmail.isNotEmpty)
-                                _infoRow(
-                                  label: 'Encoder Email',
-                                  value: encodedByEmail,
-                                ),
-                              if (notes.isNotEmpty)
-                                _infoRow(
-                                  label: 'Notes',
-                                  value: notes,
-                                ),
-                            ],
-                          ),
+                            );
+                          },
                         );
                       },
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

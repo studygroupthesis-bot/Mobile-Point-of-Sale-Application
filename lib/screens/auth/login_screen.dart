@@ -3,7 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'widget/custom_text_field.dart';
 import 'register_screen.dart';
 import 'verify_email_screen.dart';
+import 'forgot_password_screen.dart';
 import '../../app/app.dart';
+import '../../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
   bool loading = false;
+  bool googleLoading = false;
 
   @override
   void dispose() {
@@ -73,7 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (c) => const PopPayApp()),
+        MaterialPageRoute(builder: (_) => const PopPayApp()),
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -102,6 +105,55 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) {
         setState(() => loading = false);
+      }
+    }
+  }
+
+  Future<void> signInWithGoogle() async {
+    setState(() => googleLoading = true);
+
+    try {
+      final cred = await AuthService.instance.signInWithGoogle();
+      final user = cred.user;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: 'google-user-null',
+          message: 'Google sign-in failed.',
+        );
+      }
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const PopPayApp()),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      String message = e.message ?? 'Google sign-in failed.';
+
+      if (e.code == 'google-sign-in-cancelled') {
+        message = 'Google sign-in was cancelled.';
+      } else if (e.code == 'account-exists-with-different-credential') {
+        message = 'An account already exists with a different sign-in method.';
+      } else if (e.code == 'invalid-credential') {
+        message = 'Invalid Google credential.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Google sign-in failed: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => googleLoading = false);
       }
     }
   }
@@ -194,7 +246,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
-                                  onPressed: () {},
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ForgotPasswordScreen(),
+                                      ),
+                                    );
+                                  },
                                   child: const Text(
                                     "Forgot Password?",
                                     style: TextStyle(color: Colors.white),
@@ -237,7 +297,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               const Row(
                                 children: [
                                   Expanded(
-                                      child: Divider(color: Colors.white54)),
+                                    child: Divider(color: Colors.white54),
+                                  ),
                                   Padding(
                                     padding:
                                         EdgeInsets.symmetric(horizontal: 10),
@@ -247,19 +308,27 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   ),
                                   Expanded(
-                                      child: Divider(color: Colors.white54)),
+                                    child: Divider(color: Colors.white54),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 20),
                               Center(
                                 child: GestureDetector(
-                                  onTap: () {
-                                    // Add Google sign-in later
-                                  },
-                                  child: Image.asset(
-                                    "assets/google.png",
-                                    height: 45,
-                                  ),
+                                  onTap: googleLoading ? null : signInWithGoogle,
+                                  child: googleLoading
+                                      ? const SizedBox(
+                                          width: 45,
+                                          height: 45,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Image.asset(
+                                          "assets/google.png",
+                                          height: 45,
+                                        ),
                                 ),
                               ),
                               const SizedBox(height: 25),
@@ -268,7 +337,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   onTap: () => Navigator.pushReplacement(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (c) => const RegisterScreen(),
+                                      builder: (_) => const RegisterScreen(),
                                     ),
                                   ),
                                   child: const Text(

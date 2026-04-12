@@ -1022,8 +1022,8 @@ class _EditItemScreenState extends State<EditItemScreen> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Color(0xFFFFE5EE),
-                    Color(0xFFE9FFF7),
+                    Color(0xFFF1F4F4),
+                    Color(0xFFDDF3EF),
                   ],
                 ),
               ),

@@ -138,15 +138,15 @@ class ReceiptShareService {
     }).toList();
   }
 
-  String _buildPublicReceiptUrl({
-    required String storeId,
-    required String transactionId,
-  }) {
-    final origin = Uri.base.origin;
-    return '$origin/#/public-receipt?storeId='
-        '${Uri.encodeComponent(storeId)}&transactionId='
-        '${Uri.encodeComponent(transactionId)}';
-  }
+String _buildPublicReceiptUrl({
+  required String storeId,
+  required String transactionId,
+}) {
+  final origin = Uri.base.origin;
+  return '$origin/public-receipt'
+      '?storeId=${Uri.encodeComponent(storeId)}'
+      '&transactionId=${Uri.encodeComponent(transactionId)}';
+}
 
   double _safeToDouble(dynamic value, {double fallback = 0.0}) {
     if (value is num) return value.toDouble();

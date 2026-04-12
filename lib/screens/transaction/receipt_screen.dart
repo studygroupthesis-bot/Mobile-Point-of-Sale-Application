@@ -144,8 +144,10 @@ class ReceiptScreen extends StatelessWidget {
                   const SizedBox(height: 18),
                   _infoRow('Invoice ID', data.invoiceId),
                   _infoRow('Payment', data.paymentMode),
-                  _infoRow('Cashier UID',
-                      data.cashierUid.isEmpty ? '-' : data.cashierUid),
+                  _infoRow(
+                    'Cashier UID',
+                    data.cashierUid.isEmpty ? '-' : data.cashierUid,
+                  ),
                   const Divider(height: 28),
                   const Text(
                     'Items',
@@ -187,8 +189,9 @@ class ReceiptScreen extends StatelessWidget {
                   _amountRow('Taxable Sales', _peso(data.taxableSales)),
                   if (data.taxEnabled)
                     _amountRow(
-                        '${data.taxName} (${data.taxRate.toStringAsFixed(0)}%)',
-                        _peso(data.tax)),
+                      '${data.taxName} (${data.taxRate.toStringAsFixed(0)}%)',
+                      _peso(data.tax),
+                    ),
                   if (!data.taxEnabled) _amountRow('Tax', _peso(0)),
                   const SizedBox(height: 6),
                   _amountRow(
@@ -231,15 +234,6 @@ class ReceiptScreen extends StatelessWidget {
                       data: receiptUrl!,
                       version: QrVersions.auto,
                       size: 220,
-                    ),
-                    const SizedBox(height: 12),
-                    SelectableText(
-                      receiptUrl!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                      ),
                     ),
                   ],
                 ),
