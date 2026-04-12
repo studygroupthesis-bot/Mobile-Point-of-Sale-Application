@@ -36,9 +36,18 @@ class PublicReceiptScreen extends StatelessWidget {
         .snapshots();
 
     return Scaffold(
+      backgroundColor: const Color(0xFFEAF6F4),
       appBar: AppBar(
-        title: const Text('Public Receipt'),
+        backgroundColor: const Color(0xFFEAF6F4),
+        elevation: 0,
         centerTitle: true,
+        title: const Text(
+          'Public Receipt',
+          style: TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: stream,
@@ -65,12 +74,15 @@ class PublicReceiptScreen extends StatelessWidget {
           final subtotal = _toDouble(data['subtotal']);
           final tax = _toDouble(data['tax']);
           final total = _toDouble(data['total'] ?? data['grandTotal']);
-          final amountPaid = _toDouble(data['amountPaid']);
+          final amountPaid = _toDouble(
+            data['amountPaid'] ?? data['amountReceived'],
+          );
           final change = _toDouble(data['change']);
           final paymentMethod =
               (data['paymentMethod'] ?? data['paymentMode'] ?? 'Cash')
                   .toString();
-          final cashierName = (data['cashierName'] ?? '-').toString();
+          final cashierName =
+              (data['cashierName'] ?? data['cashierUid'] ?? '-').toString();
 
           return SafeArea(
             child: SingleChildScrollView(
@@ -78,10 +90,17 @@ class PublicReceiptScreen extends StatelessWidget {
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x14000000),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(18),
@@ -123,7 +142,9 @@ class PublicReceiptScreen extends StatelessWidget {
                             final name = (map['name'] ?? 'Item').toString();
                             final qty = _toInt(map['qty']);
                             final price = _toDouble(map['price']);
-                            final lineTotal = _toDouble(map['total']);
+                            final lineTotal = _toDouble(
+                              map['lineTotal'] ?? map['total'] ?? (price * qty),
+                            );
 
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 10),
