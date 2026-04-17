@@ -44,9 +44,18 @@ class PublicReceiptScreen extends StatelessWidget {
         .snapshots();
 
     return Scaffold(
+      backgroundColor: const Color(0xFFEAF6F4),
       appBar: AppBar(
-        title: const Text('Public Receipt'),
+        backgroundColor: const Color(0xFFEAF6F4),
+        elevation: 0,
         centerTitle: true,
+        title: const Text(
+          'Public Receipt',
+          style: TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: stream,
@@ -85,9 +94,10 @@ class PublicReceiptScreen extends StatelessWidget {
           final subtotal = _toDouble(data['subtotal']);
           final taxableSales = _toDouble(data['taxableSales'] ?? subtotal);
           final tax = _toDouble(data['tax']);
-          final total = _toDouble(data['grandTotal'] ?? data['total']);
-          final amountReceived =
-              _toDouble(data['amountReceived'] ?? data['amountPaid']);
+          final total = _toDouble(data['total'] ?? data['grandTotal']);
+          final amountPaid = _toDouble(
+            data['amountPaid'] ?? data['amountReceived'],
+          );
           final change = _toDouble(data['change']);
           final paymentMethod =
               (data['paymentMethod'] ?? data['paymentMode'] ?? 'Cash')
@@ -102,10 +112,17 @@ class PublicReceiptScreen extends StatelessWidget {
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x14000000),
+                          blurRadius: 10,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(18),
@@ -151,9 +168,9 @@ class PublicReceiptScreen extends StatelessWidget {
                             final map = Map<String, dynamic>.from(item as Map);
                             final name = (map['name'] ?? 'Item').toString();
                             final qty = _toInt(map['qty']);
-                            final unitPrice = _toDouble(map['price']);
+                            final price = _toDouble(map['price']);
                             final lineTotal = _toDouble(
-                              map['total'] ?? (unitPrice * qty),
+                              map['lineTotal'] ?? map['total'] ?? (price * qty),
                             );
 
                             return Padding(
@@ -168,7 +185,7 @@ class PublicReceiptScreen extends StatelessWidget {
                                     ),
                                   ),
                                   Text(
-                                    '₱${unitPrice.toStringAsFixed(2)}',
+                                    '₱${price.toStringAsFixed(2)}',
                                     style: const TextStyle(fontSize: 14),
                                   ),
                                   const SizedBox(width: 12),
@@ -194,7 +211,7 @@ class PublicReceiptScreen extends StatelessWidget {
                           ),
                           _summaryRow('Grand Total', _peso(total), bold: true),
                           const SizedBox(height: 8),
-                          _summaryRow('Amount Received', _peso(amountReceived)),
+                          _summaryRow('Amount Received', _peso(amountPaid)),
                           _summaryRow('Change', _peso(change)),
                           const SizedBox(height: 12),
                           Text(

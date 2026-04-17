@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CustomNavBar extends StatelessWidget {
   final int currentIndex;
@@ -78,9 +76,11 @@ class CustomNavBar extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: ClipOval(
-                    child: _StoreLogoOrIcon(
-                      selected: currentIndex == 2,
+                  child: Center(
+                    child: Icon(
+                      Icons.qr_code_scanner_rounded,
+                      size: 30,
+                      color: const Color(0xFF0B7E7B),
                     ),
                   ),
                 ),
@@ -110,61 +110,6 @@ class CustomNavBar extends StatelessWidget {
           size: 24,
           color: selected ? const Color(0xFF0B7E7B) : Colors.white,
         ),
-      ),
-    );
-  }
-}
-
-class _StoreLogoOrIcon extends StatelessWidget {
-  final bool selected;
-
-  const _StoreLogoOrIcon({required this.selected});
-
-  @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      return _fallbackIcon();
-    }
-
-    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: userRef.snapshots(),
-      builder: (context, userSnap) {
-        final storeId = userSnap.data?.data()?['storeId'] as String?;
-        if (storeId == null || storeId.isEmpty) {
-          return _fallbackIcon();
-        }
-
-        final storeRef =
-            FirebaseFirestore.instance.collection('stores').doc(storeId);
-
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: storeRef.snapshots(),
-          builder: (context, storeSnap) {
-            final logoUrl = storeSnap.data?.data()?['logo_url'] as String?;
-            if (logoUrl == null || logoUrl.isEmpty) {
-              return _fallbackIcon();
-            }
-
-            return Image.network(
-              logoUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _fallbackIcon(),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _fallbackIcon() {
-    return Center(
-      child: Icon(
-        Icons.qr_code_scanner_rounded,
-        size: 30,
-        color: selected ? const Color(0xFF0B7E7B) : const Color(0xFF0B7E7B),
       ),
     );
   }

@@ -24,10 +24,12 @@ enum DashboardExportAction {
 class DashboardStoreContext {
   final String storeId;
   final String storeName;
+  final String? logoUrl;
 
   const DashboardStoreContext({
     required this.storeId,
     required this.storeName,
+    this.logoUrl,
   });
 }
 
@@ -286,9 +288,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         (storeData['business_name'] ?? storeData['name'] ?? 'My Store')
             .toString();
 
+    final logoUrl = (storeData['logo_url'] ?? '').toString().trim();
+
     return DashboardStoreContext(
       storeId: storeId,
       storeName: storeName,
+      logoUrl: logoUrl.isEmpty ? null : logoUrl,
     );
   }
 
@@ -1520,6 +1525,107 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }).toList();
   }
 
+  Widget _buildStoreLogo(String? logoUrl) {
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: (logoUrl != null && logoUrl.isNotEmpty)
+          ? Image.network(
+              logoUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) {
+                return const Icon(
+                  Icons.storefront,
+                  color: Color(0xFFB12A87),
+                );
+              },
+            )
+          : const Icon(
+              Icons.storefront,
+              color: Color(0xFFB12A87),
+            ),
+    );
+  }
+
+  Widget _buildDashboardHeader(
+    DashboardStoreContext store,
+    List<DashboardLowStockItem> lowStockItems,
+    DashboardReportData report,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFFDDF3F0),
+      ),
+      child: Row(
+        children: [
+          _buildStoreLogo(store.logoUrl),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              store.storeName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1F1F1F),
+              ),
+            ),
+          ),
+          _buildNotificationBell(store, lowStockItems),
+          const SizedBox(width: 8),
+          PopupMenuButton<DashboardExportAction>(
+            tooltip: 'Export summary',
+            surfaceTintColor: Colors.white,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            icon: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.more_vert,
+                color: Colors.black87,
+              ),
+            ),
+            onSelected: (value) async {
+              await _handleExport(value, report);
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: DashboardExportAction.pdf,
+                child: Text('Create PDF Summary'),
+              ),
+              PopupMenuItem(
+                value: DashboardExportAction.csv,
+                child: Text('Copy CSV Summary'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _headerActionButton({
     required Widget child,
     required VoidCallback onTap,
@@ -1826,253 +1932,202 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   .collection('items')
                   .snapshots();
 
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: txStream,
-                  builder: (context, txSnap) {
-                    if (txSnap.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: txStream,
+                builder: (context, txSnap) {
+                  if (txSnap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                    if (txSnap.hasError) {
-                      return Center(
-                        child: Text(
-                          'Failed to load sales summary.\n${txSnap.error}',
-                          textAlign: TextAlign.center,
-                        ),
-                      );
-                    }
-
-                    final docs = txSnap.data?.docs ?? [];
-                    final report = _buildReportData(
-                      store: store,
-                      range: range,
-                      docs: docs,
+                  if (txSnap.hasError) {
+                    return Center(
+                      child: Text(
+                        'Failed to load sales summary.\n${txSnap.error}',
+                        textAlign: TextAlign.center,
+                      ),
                     );
+                  }
 
-                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: itemsStream,
-                      builder: (context, itemSnap) {
-                        if (itemSnap.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
+                  final docs = txSnap.data?.docs ?? [];
+                  final report = _buildReportData(
+                    store: store,
+                    range: range,
+                    docs: docs,
+                  );
 
-                        if (itemSnap.hasError) {
-                          return Center(
-                            child: Text(
-                              'Failed to load inventory alerts.\n${itemSnap.error}',
-                              textAlign: TextAlign.center,
-                            ),
-                          );
-                        }
+                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: itemsStream,
+                    builder: (context, itemSnap) {
+                      if (itemSnap.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
 
-                        final itemDocs = itemSnap.data?.docs ?? [];
-                        final lowStockItems = _buildLowStockItems(itemDocs);
+                      if (itemSnap.hasError) {
+                        return Center(
+                          child: Text(
+                            'Failed to load inventory alerts.\n${itemSnap.error}',
+                            textAlign: TextAlign.center,
+                          ),
+                        );
+                      }
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.storefront,
-                                    color: Color(0xFFB12A87),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    store.storeName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                      final itemDocs = itemSnap.data?.docs ?? [];
+                      final lowStockItems = _buildLowStockItems(itemDocs);
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildDashboardHeader(store, lowStockItems, report),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Your Dashboard',
+                                    style: TextStyle(
                                       fontSize: 22,
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
-                                ),
-                                _buildNotificationBell(store, lowStockItems),
-                                const SizedBox(width: 8),
-                                PopupMenuButton<DashboardExportAction>(
-                                  tooltip: 'Export summary',
-                                  icon: const Icon(Icons.more_vert),
-                                  onSelected: (value) async {
-                                    await _handleExport(value, report);
-                                  },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: DashboardExportAction.pdf,
-                                      child: Text('Create PDF Summary'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: DashboardExportAction.csv,
-                                      child: Text('Copy CSV Summary'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Your Dashboard',
-                                      style: TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    _buildPrimarySalesCard(report, range, store),
-                                    const SizedBox(height: 14),
-                                    IntrinsicHeight(
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          Expanded(
-                                            child: _statCard(
-                                              title: 'Total Product Sold',
-                                              value:
-                                                  '${report.totalProductsSold}',
-                                              smallNote:
-                                                  report.transactionCount > 0
-                                                      ? 'Updated live'
-                                                      : 'No sales yet',
-                                              icon:
-                                                  Icons.shopping_bag_outlined,
-                                              iconColor:
-                                                  const Color(0xFF0E6C73),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: _statCard(
-                                              title: 'Low Stock Items',
-                                              value: '${lowStockItems.length}',
-                                              smallNote: 'Tap to open alerts',
-                                              icon:
-                                                  Icons.warning_amber_rounded,
-                                              iconColor: Colors.redAccent,
-                                              onTap: () =>
-                                                  _openNotificationsScreen(
-                                                store,
-                                                lowStockItems,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 18),
-                                    Row(
+                                  const SizedBox(height: 12),
+                                  _buildPrimarySalesCard(report, range, store),
+                                  const SizedBox(height: 14),
+                                  IntrinsicHeight(
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
                                       children: [
-                                        const Expanded(
-                                          child: Text(
-                                            'Summary Reports',
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w800,
-                                              color: Color(0xFF0E6C73),
-                                            ),
+                                        Expanded(
+                                          child: _statCard(
+                                            title: 'Total Product Sold',
+                                            value:
+                                                '${report.totalProductsSold}',
+                                            smallNote:
+                                                report.transactionCount > 0
+                                                    ? 'Updated live'
+                                                    : 'No sales yet',
+                                            icon: Icons.shopping_bag_outlined,
+                                            iconColor:
+                                                const Color(0xFF0E6C73),
                                           ),
                                         ),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withValues(
-                                                  alpha: 0.08,
-                                                ),
-                                                blurRadius: 6,
-                                                offset: const Offset(0, 2),
-                                              ),
-                                            ],
-                                          ),
-                                          child: DropdownButtonHideUnderline(
-                                            child:
-                                                DropdownButton<DashboardFilter>(
-                                              value: _selectedFilter,
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              items: _filterItems(),
-                                              onChanged: (value) {
-                                                if (value == null) return;
-                                                setState(
-                                                  () => _selectedFilter = value,
-                                                );
-                                              },
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: _statCard(
+                                            title: 'Low Stock Items',
+                                            value: '${lowStockItems.length}',
+                                            smallNote: 'Tap to open alerts',
+                                            icon:
+                                                Icons.warning_amber_rounded,
+                                            iconColor: Colors.redAccent,
+                                            onTap: () =>
+                                                _openNotificationsScreen(
+                                              store,
+                                              lowStockItems,
                                             ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 12),
-                                    _buildSummaryGraph(docs, range),
-                                    if (!allowYearly) ...[
-                                      const SizedBox(height: 8),
-                                      const Text(
-                                        'Yearly view is disabled for now to avoid loading too many transaction records.',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.black54,
+                                  ),
+                                  const SizedBox(height: 18),
+                                  Row(
+                                    children: [
+                                      const Expanded(
+                                        child: Text(
+                                          'Summary Reports',
+                                          style: TextStyle(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF0E6C73),
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.08,
+                                              ),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: DropdownButtonHideUnderline(
+                                          child:
+                                              DropdownButton<DashboardFilter>(
+                                            value: _selectedFilter,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            items: _filterItems(),
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setState(
+                                                () => _selectedFilter = value,
+                                              );
+                                            },
+                                          ),
                                         ),
                                       ),
                                     ],
-                                    const SizedBox(height: 14),
-                                    _summaryInfoCard(report),
-                                    const SizedBox(height: 14),
-                                    _buildSectionTitle(
-                                      title: 'Recent Transactions',
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _buildSummaryGraph(docs, range),
+                                  if (!allowYearly) ...[
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'Yearly view is disabled for now to avoid loading too many transaction records.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black54,
+                                      ),
                                     ),
-                                    const SizedBox(height: 10),
-                                    if (docs.isEmpty)
-                                      const Center(
-                                        child: Padding(
-                                          padding: EdgeInsets.symmetric(
-                                            vertical: 24,
-                                          ),
-                                          child: Text(
-                                            'No sales found for this selected period.',
-                                            style: TextStyle(
-                                              color: Colors.black54,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      ..._buildRecentTransactions(docs),
                                   ],
-                                ),
+                                  const SizedBox(height: 14),
+                                  _summaryInfoCard(report),
+                                  const SizedBox(height: 14),
+                                  _buildSectionTitle(
+                                    title: 'Recent Transactions',
+                                  ),
+                                  const SizedBox(height: 10),
+                                  if (docs.isEmpty)
+                                    const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.symmetric(
+                                          vertical: 24,
+                                        ),
+                                        child: Text(
+                                          'No sales found for this selected period.',
+                                          style: TextStyle(
+                                            color: Colors.black54,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    ..._buildRecentTransactions(docs),
+                                ],
                               ),
                             ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
               );
             },
           ),

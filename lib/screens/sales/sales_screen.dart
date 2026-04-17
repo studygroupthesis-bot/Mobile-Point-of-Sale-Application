@@ -14,14 +14,15 @@ class SalesScreen extends StatefulWidget {
 }
 
 class _SalesScreenState extends State<SalesScreen> {
-  final _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   bool _searching = false;
   final TextEditingController _searchCtrl = TextEditingController();
   DateTime _selectedDate = DateTime.now();
 
-  final money = NumberFormat.currency(locale: 'en_PH', symbol: '₱');
-  final timeFmt = DateFormat('h:mm a');
+  final NumberFormat money =
+      NumberFormat.currency(locale: 'en_PH', symbol: '₱');
+  final DateFormat timeFmt = DateFormat('h:mm a');
 
   @override
   void dispose() {
@@ -31,12 +32,12 @@ class _SalesScreenState extends State<SalesScreen> {
 
   Future<String> _requireStoreId() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception("Not logged in.");
+    if (user == null) throw Exception('Not logged in.');
 
     final snap = await _db.collection('users').doc(user.uid).get();
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
-      throw Exception("Missing storeId in users/${user.uid}.");
+      throw Exception('Missing storeId in users/${user.uid}.');
     }
     return storeId;
   }
@@ -371,6 +372,12 @@ class _SalesScreenState extends State<SalesScreen> {
         final data = snap.data?.data() ?? {};
         final storeName =
             (data['business_name'] ?? data['name'] ?? 'Store').toString();
+        final logoUrl = (data['logo_url'] ??
+                data['logoUrl'] ??
+                data['storeLogoUrl'] ??
+                '')
+            .toString()
+            .trim();
 
         return Row(
           children: [
@@ -388,14 +395,31 @@ class _SalesScreenState extends State<SalesScreen> {
                   ),
                 ],
               ),
-              child: const Center(
-                child: Icon(Icons.priority_high, color: Color(0xFF8A2BE2)),
-              ),
+              clipBehavior: Clip.antiAlias,
+              child: logoUrl.isNotEmpty
+                  ? Image.network(
+                      logoUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Center(
+                        child: Icon(
+                          Icons.priority_high,
+                          color: Color(0xFF8A2BE2),
+                        ),
+                      ),
+                    )
+                  : const Center(
+                      child: Icon(
+                        Icons.priority_high,
+                        color: Color(0xFF8A2BE2),
+                      ),
+                    ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 storeName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
@@ -439,7 +463,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     controller: _searchCtrl,
                     onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
-                      hintText: "Search invoice…",
+                      hintText: 'Search invoice…',
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -452,7 +476,7 @@ class _SalesScreenState extends State<SalesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            "Today’s Sales",
+                            'Today’s Sales',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               color: Colors.black54,
@@ -495,7 +519,7 @@ class _SalesScreenState extends State<SalesScreen> {
       children: [
         const Expanded(
           child: Text(
-            "Transaction History",
+            'Transaction History',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w900,
@@ -570,7 +594,7 @@ class _SalesScreenState extends State<SalesScreen> {
           child: Icon(Icons.receipt, color: Color(0xFF2E7D78)),
         ),
         title: Text(
-          "Invoice #$invoiceNo",
+          'Invoice #$invoiceNo',
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         subtitle: Row(

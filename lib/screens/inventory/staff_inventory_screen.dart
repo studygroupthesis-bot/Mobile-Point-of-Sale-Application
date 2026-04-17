@@ -617,21 +617,21 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
             ? (media.padding.bottom * 0.35) + 8
             : 14.0;
 
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final selectedItems = allItems
-                .where((item) => (_cart[item.id] ?? 0) > 0)
-                .toList();
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+            child: StatefulBuilder(
+              builder: (context, setModalState) {
+                final selectedItems = allItems
+                    .where((item) => (_cart[item.id] ?? 0) > 0)
+                    .toList();
 
-            final totalItems = _totalItems;
-            final totalAmount = _totalAmount(allItems);
+                final totalItems = _totalItems;
+                final totalAmount = _totalAmount(allItems);
 
-            return SafeArea(
-              top: false,
-              bottom: false,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-                child: Container(
+                return Container(
                   height: sheetHeight,
                   clipBehavior: Clip.antiAlias,
                   decoration: const BoxDecoration(
@@ -681,12 +681,8 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                                 ),
                               )
                             : ListView.separated(
-                                padding: const EdgeInsets.fromLTRB(
-                                  20,
-                                  0,
-                                  20,
-                                  20,
-                                ),
+                                padding:
+                                    const EdgeInsets.fromLTRB(20, 0, 20, 20),
                                 itemCount: selectedItems.length,
                                 separatorBuilder: (_, __) =>
                                     const SizedBox(height: 12),
@@ -891,10 +887,10 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                       ),
                     ],
                   ),
-                ),
-              ),
-            );
-          },
+                );
+              },
+            ),
+          ),
         );
       },
     );
@@ -931,6 +927,78 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCategorySection({
+    required String category,
+    required List<InventoryItem> items,
+  }) {
+    final bool showHorizontal = _selectedCategory == 'All';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            category,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Colors.black,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (showHorizontal)
+            SizedBox(
+              height: 205,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                padding: const EdgeInsets.only(right: 18),
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final qty = _qtyOf(item.id);
+
+                  return SizedBox(
+                    width: 148,
+                    child: _StaffItemCardCompact(
+                      item: item,
+                      qty: qty,
+                      onAdd: () => _addToCart(item),
+                      peso: _peso,
+                    ),
+                  );
+                },
+              ),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: 0.74,
+              ),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                final qty = _qtyOf(item.id);
+
+                return _StaffItemCardCompact(
+                  item: item,
+                  qty: qty,
+                  onAdd: () => _addToCart(item),
+                  peso: _peso,
+                );
+              },
+            ),
+        ],
       ),
     );
   }
@@ -1015,91 +1083,104 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                 final searchedItems = allItems.where((item) {
                   if (_search.trim().isEmpty) return true;
 
-                  return item.name
-                          .toLowerCase()
-                          .contains(_search.toLowerCase()) ||
-                      item.category
-                          .toLowerCase()
-                          .contains(_search.toLowerCase()) ||
-                      item.barcode
-                          .toLowerCase()
-                          .contains(_search.toLowerCase());
+                  final q = _search.toLowerCase();
+                  return item.name.toLowerCase().contains(q) ||
+                      item.category.toLowerCase().contains(q) ||
+                      item.barcode.toLowerCase().contains(q);
                 }).toList();
 
                 final sectionMap = _buildSections(searchedItems);
                 final totalAmount = _totalAmount(allItems);
 
                 return Stack(
-                  clipBehavior: Clip.hardEdge,
                   children: [
                     Positioned.fill(
                       bottom: _reservedBottomSpace + safeBottom,
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                        padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 _StoreAvatar(
                                   storeName: storeName,
                                   storeLogoUrl: access.storeLogoUrl,
+                                  size: 50,
                                 ),
-                                const SizedBox(width: 14),
+                                const SizedBox(width: 12),
                                 Expanded(
-                                  child: Text(
-                                    storeName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 26,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.black,
-                                      shadows: [
-                                        Shadow(
-                                          color: Color(0x22000000),
-                                          blurRadius: 8,
-                                          offset: Offset(0, 3),
-                                        ),
-                                      ],
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      storeName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.black,
+                                        height: 1.05,
+                                      ),
                                     ),
                                   ),
                                 ),
                                 if (access.shouldShowMenu)
-                                  PopupMenuButton<InventoryMenuAction>(
-                                    tooltip: 'Inventory actions',
-                                    onSelected: (value) {
-                                      _handleMenuAction(
-                                        value,
-                                        access,
-                                        allItems,
-                                      );
-                                    },
-                                    itemBuilder: (context) =>
-                                        _buildInventoryMenuItems(access),
-                                    icon: const Icon(
-                                      Icons.menu_rounded,
-                                      size: 34,
-                                      color: Colors.black,
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: BoxDecoration(
+                                      color:
+                                          const Color(0xFFFFFFFF).withAlpha(128),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: PopupMenuButton<InventoryMenuAction>(
+                                      tooltip: 'Inventory actions',
+                                      color: Colors.white,
+                                      padding: EdgeInsets.zero,
+                                      onSelected: (value) {
+                                        _handleMenuAction(
+                                          value,
+                                          access,
+                                          allItems,
+                                        );
+                                      },
+                                      itemBuilder: (context) =>
+                                          _buildInventoryMenuItems(access),
+                                      icon: const Icon(
+                                        Icons.menu_rounded,
+                                        size: 24,
+                                        color: Colors.black,
+                                      ),
                                     ),
                                   )
                                 else
-                                  const Icon(
-                                    Icons.lock_outline,
-                                    size: 28,
-                                    color: Colors.black45,
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: BoxDecoration(
+                                      color:
+                                          const Color(0xFFFFFFFF).withAlpha(128),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.lock_outline,
+                                      size: 20,
+                                      color: Colors.black45,
+                                    ),
                                   ),
                               ],
                             ),
-                            const SizedBox(height: 22),
+                            const SizedBox(height: 14),
                             Container(
-                              height: 58,
+                              height: 48,
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF4F7F7),
-                                borderRadius: BorderRadius.circular(18),
+                                color: const Color(0xFFF6F8F8),
+                                borderRadius: BorderRadius.circular(15),
                                 boxShadow: const [
                                   BoxShadow(
-                                    color: Color(0x20000000),
+                                    color: Color(0x18000000),
                                     blurRadius: 10,
                                     offset: Offset(0, 4),
                                   ),
@@ -1113,60 +1194,60 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                                   });
                                 },
                                 style: const TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 14.5,
                                   fontWeight: FontWeight.w500,
                                 ),
                                 decoration: InputDecoration(
                                   hintText: 'Search',
                                   hintStyle: TextStyle(
-                                    color: Colors.black.withOpacity(0.35),
-                                    fontSize: 16,
+                                    color: Colors.black.withAlpha(90),
+                                    fontSize: 14.5,
                                     fontWeight: FontWeight.w500,
                                   ),
                                   border: InputBorder.none,
                                   contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 18,
+                                    horizontal: 16,
+                                    vertical: 14,
                                   ),
                                   suffixIcon: const Padding(
-                                    padding: EdgeInsets.only(right: 12),
+                                    padding: EdgeInsets.only(right: 10),
                                     child: Icon(
                                       Icons.search_rounded,
-                                      size: 34,
+                                      size: 28,
                                       color: Colors.black,
                                     ),
                                   ),
                                   suffixIconConstraints: const BoxConstraints(
-                                    minWidth: 48,
-                                    minHeight: 48,
+                                    minWidth: 42,
+                                    minHeight: 42,
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 18),
                             const Text(
                               'Categories',
                               style: TextStyle(
-                                fontSize: 19,
+                                fontSize: 17,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.black,
                               ),
                             ),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 12),
                             SizedBox(
-                              height: 142,
+                              height: 92,
                               child: ListView.separated(
                                 padding: const EdgeInsets.only(right: 18),
                                 scrollDirection: Axis.horizontal,
                                 itemCount: categories.length,
                                 separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 16),
+                                    const SizedBox(width: 10),
                                 itemBuilder: (context, index) {
                                   final category = categories[index];
                                   final selected =
                                       _selectedCategory == category;
 
-                                  return _StaffCategoryCard(
+                                  return _StaffCategoryCardCompact(
                                     category: category,
                                     selected: selected,
                                     items: allItems,
@@ -1196,49 +1277,9 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                               )
                             else
                               ...sectionMap.entries.map((entry) {
-                                final category = entry.key;
-                                final items = entry.value;
-
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 22),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        category,
-                                        style: const TextStyle(
-                                          fontSize: 19,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.black,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 14),
-                                      SizedBox(
-                                        height: 248,
-                                        child: ListView.separated(
-                                          padding: const EdgeInsets.only(
-                                            right: 18,
-                                          ),
-                                          scrollDirection: Axis.horizontal,
-                                          itemCount: items.length,
-                                          separatorBuilder: (_, __) =>
-                                              const SizedBox(width: 16),
-                                          itemBuilder: (context, index) {
-                                            final item = items[index];
-                                            final qty = _qtyOf(item.id);
-
-                                            return _StaffItemCard(
-                                              item: item,
-                                              qty: qty,
-                                              onAdd: () => _addToCart(item),
-                                              peso: _peso,
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                return _buildCategorySection(
+                                  category: entry.key,
+                                  items: entry.value,
                                 );
                               }),
                           ],
@@ -1246,8 +1287,8 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                       ),
                     ),
                     Positioned(
-                      left: 20,
-                      right: 20,
+                      left: 18,
+                      right: 18,
                       bottom: _basketBottomOffset + safeBottom,
                       child: GestureDetector(
                         onTap: () => _openCartSheet(allItems),
@@ -1336,10 +1377,12 @@ class _StaffStoreAccess {
 class _StoreAvatar extends StatelessWidget {
   final String storeName;
   final String storeLogoUrl;
+  final double size;
 
   const _StoreAvatar({
     required this.storeName,
     required this.storeLogoUrl,
+    this.size = 56,
   });
 
   @override
@@ -1348,14 +1391,14 @@ class _StoreAvatar extends StatelessWidget {
         storeName.trim().isEmpty ? 'S' : storeName.trim()[0].toUpperCase();
 
     return Container(
-      width: 62,
-      height: 62,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,
         boxShadow: const [
           BoxShadow(
-            color: Color(0x22000000),
+            color: Color(0x18000000),
             blurRadius: 10,
             offset: Offset(0, 4),
           ),
@@ -1369,10 +1412,10 @@ class _StoreAvatar extends StatelessWidget {
                 errorBuilder: (_, __, ___) => Center(
                   child: Text(
                     initial,
-                    style: const TextStyle(
-                      fontSize: 28,
+                    style: TextStyle(
+                      fontSize: size * 0.42,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFFB11C8E),
+                      color: const Color(0xFFB11C8E),
                     ),
                   ),
                 ),
@@ -1380,10 +1423,10 @@ class _StoreAvatar extends StatelessWidget {
             : Center(
                 child: Text(
                   initial,
-                  style: const TextStyle(
-                    fontSize: 28,
+                  style: TextStyle(
+                    fontSize: size * 0.42,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFFB11C8E),
+                    color: const Color(0xFFB11C8E),
                   ),
                 ),
               ),
@@ -1392,13 +1435,13 @@ class _StoreAvatar extends StatelessWidget {
   }
 }
 
-class _StaffCategoryCard extends StatelessWidget {
+class _StaffCategoryCardCompact extends StatelessWidget {
   final String category;
   final bool selected;
   final List<InventoryItem> items;
   final VoidCallback onTap;
 
-  const _StaffCategoryCard({
+  const _StaffCategoryCardCompact({
     required this.category,
     required this.selected,
     required this.items,
@@ -1413,11 +1456,12 @@ class _StaffCategoryCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 118,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        width: 96,
+        height: 92,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           boxShadow: const [
             BoxShadow(
               color: Color(0x22000000),
@@ -1434,7 +1478,7 @@ class _StaffCategoryCard extends StatelessWidget {
                 child: category == 'All'
                     ? Icon(
                         Icons.grid_view_rounded,
-                        size: 54,
+                        size: 50,
                         color: fg,
                       )
                     : _CategoryThumb(
@@ -1443,14 +1487,14 @@ class _StaffCategoryCard extends StatelessWidget {
                       ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Text(
               category,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 12.5,
                 height: 1.05,
                 fontWeight: FontWeight.w600,
                 color: fg,
@@ -1463,13 +1507,13 @@ class _StaffCategoryCard extends StatelessWidget {
   }
 }
 
-class _StaffItemCard extends StatelessWidget {
+class _StaffItemCardCompact extends StatelessWidget {
   final InventoryItem item;
   final int qty;
   final VoidCallback onAdd;
   final String Function(num value) peso;
 
-  const _StaffItemCard({
+  const _StaffItemCardCompact({
     required this.item,
     required this.qty,
     required this.onAdd,
@@ -1478,121 +1522,128 @@ class _StaffItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 176,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFD8E1E5),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x22000000),
-              blurRadius: 10,
-              offset: Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
+    final stock = item.stockQty ?? 0;
+    final hasStock = item.trackStock && item.stockQty != null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFD8E1E5),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFFFF).withAlpha(72),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  alignment: Alignment.center,
                   child: _ProductThumb(
                     item: item,
-                    size: 88,
+                    size: 60,
                     radius: 14,
                   ),
                 ),
-                const SizedBox(height: 18),
-                Text(
-                  item.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    height: 1.12,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
-                  ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                item.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  peso(item.price),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
-                  ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                peso(item.price),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
                 ),
-                const Spacer(),
-                Row(
-                  children: [
-                    if (item.trackStock && item.stockQty != null)
-                      Text(
-                        'Stock: ${item.stockQty}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black54,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      )
-                    else
-                      const SizedBox.shrink(),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: onAdd,
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF33AAA0),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Color(0x26000000),
-                              blurRadius: 8,
-                              offset: Offset(0, 4),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: hasStock
+                        ? Text(
+                            'Stock: $stock',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                              fontWeight: FontWeight.w500,
                             ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.add,
-                          color: Colors.white,
-                          size: 30,
-                        ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  GestureDetector(
+                    onTap: onAdd,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFFFF).withAlpha(210),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.add_rounded,
+                        size: 18,
+                        color: Color(0xFF33AAA0),
                       ),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          if (qty > 0)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 4,
                 ),
-              ],
-            ),
-            if (qty > 0)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF309E95),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'x$qty',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF309E95),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'x$qty',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1615,13 +1666,16 @@ class _ProductThumb extends StatelessWidget {
       return SizedBox(
         width: size,
         height: size,
-        child: Image.network(
-          item.imageUrl!,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => _FallbackItemVisual(
-            item: item,
-            size: size,
-            radius: radius,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: Image.network(
+            item.imageUrl!,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => _FallbackItemVisual(
+              item: item,
+              size: size,
+              radius: radius,
+            ),
           ),
         ),
       );
@@ -1700,7 +1754,7 @@ class _FallbackItemVisual extends StatelessWidget {
       alignment: Alignment.center,
       child: Icon(
         Icons.inventory_2_outlined,
-        color: Colors.black.withOpacity(0.35),
+        color: Colors.black.withAlpha(88),
         size: size * 0.42,
       ),
     );
@@ -1721,7 +1775,10 @@ class _CategoryThumb extends StatelessWidget {
     InventoryItem? first;
 
     for (final item in items) {
-      if (item.category.toLowerCase() == category.toLowerCase()) {
+      final normalized =
+          item.category.trim().isEmpty ? 'Uncategorized' : item.category.trim();
+
+      if (normalized.toLowerCase() == category.toLowerCase()) {
         first = item;
         break;
       }
@@ -1730,15 +1787,15 @@ class _CategoryThumb extends StatelessWidget {
     if (first == null) {
       return const Icon(
         Icons.category_outlined,
-        size: 42,
+        size: 28,
         color: Colors.black87,
       );
     }
 
     return _ProductThumb(
       item: first,
-      size: 58,
-      radius: 12,
+      size: 53,
+      radius: 8,
     );
   }
 }
@@ -1787,10 +1844,12 @@ class InventoryItem {
     final rawColor = data['colorValue'];
     if (rawColor is int) {
       colorValue = rawColor;
+    } else if (rawColor is num) {
+      colorValue = rawColor.toInt();
     }
 
     int? stockQty;
-    final rawStock = data['stockQty'];
+    final rawStock = data['stockQty'] ?? data['stock'] ?? data['quantity'];
     if (rawStock is int) {
       stockQty = rawStock;
     } else if (rawStock is double) {

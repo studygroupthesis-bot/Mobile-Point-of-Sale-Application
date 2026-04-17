@@ -82,6 +82,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
   String? _lastScannedBarcode;
   DateTime? _lastScannedAt;
 
+  bool _acceptCashPayment = true;
+  bool _acceptGcashPayment = false;
+  String _gcashQrImageUrl = '';
+  String _gcashName = '';
+  String _gcashNumber = '';
+
   final List<Map<String, dynamic>> _cartItems = [];
   List<DocumentSnapshot<Map<String, dynamic>>> _liveSuggestions = [];
 
@@ -127,49 +133,53 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Future<void> _loadStoreContext() async {
     try {
-      if (widget.storeId != null && widget.storeId!.trim().isNotEmpty) {
-        setState(() {
-          _storeId = widget.storeId!.trim();
-          _storeName = widget.storeName;
-          _loading = false;
-        });
-        return;
-      }
-
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw Exception('Not logged in. Please login again.');
-      }
-
-      final userSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      final data = userSnap.data() ?? <String, dynamic>{};
-      final resolvedStoreId = (data['storeId'] as String?)?.trim();
+      String? resolvedStoreId = widget.storeId?.trim();
+      String? resolvedStoreName = widget.storeName?.trim();
 
       if (resolvedStoreId == null || resolvedStoreId.isEmpty) {
-        throw Exception('No storeId found for this user.');
-      }
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          throw Exception('Not logged in. Please login again.');
+        }
 
-      String? resolvedStoreName = widget.storeName;
-      try {
-        final storeSnap = await FirebaseFirestore.instance
-            .collection('stores')
-            .doc(resolvedStoreId)
+        final userSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
             .get();
 
-        resolvedStoreName =
-            (storeSnap.data()?['business_name'] as String?)?.trim() ??
-                (storeSnap.data()?['storeName'] as String?)?.trim() ??
-                resolvedStoreName;
-      } catch (_) {}
+        final userData = userSnap.data() ?? <String, dynamic>{};
+        resolvedStoreId = (userData['storeId'] as String?)?.trim();
+
+        if (resolvedStoreId == null || resolvedStoreId.isEmpty) {
+          throw Exception('No storeId found for this user.');
+        }
+      }
+
+      final storeSnap = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(resolvedStoreId)
+          .get();
+
+      final storeData = storeSnap.data() ?? <String, dynamic>{};
+
+      resolvedStoreName =
+          (storeData['business_name'] as String?)?.trim().isNotEmpty == true
+              ? (storeData['business_name'] as String).trim()
+              : ((storeData['storeName'] as String?)?.trim() ??
+                  resolvedStoreName);
 
       if (!mounted) return;
+
       setState(() {
         _storeId = resolvedStoreId;
         _storeName = resolvedStoreName;
+        _acceptCashPayment = (storeData['accept_cash'] as bool?) ?? true;
+        _acceptGcashPayment = (storeData['accept_gcash'] as bool?) ?? false;
+        _gcashQrImageUrl = (storeData['gcashQrImageUrl'] as String?) ??
+            (storeData['gcashQrUrl'] as String?) ??
+            '';
+        _gcashName = (storeData['gcashName'] as String?) ?? '';
+        _gcashNumber = (storeData['gcashNumber'] as String?) ?? '';
         _loading = false;
       });
     } catch (e) {
@@ -389,6 +399,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       'grandTotal': grandTotal,
       'total': grandTotal,
       'amountReceived': amountReceived,
+      'amountPaid': amountReceived,
       'change': change,
       'items': items,
       'createdAt': FieldValue.serverTimestamp(),
@@ -817,6 +828,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
       return;
     }
 
+    if (!_acceptCashPayment && !_acceptGcashPayment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No payment method is enabled in Store Settings.'),
+        ),
+      );
+      return;
+    }
+
     final paymentResult = await _showPaymentSheet();
     if (paymentResult == null) return;
 
@@ -862,6 +882,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           'representationType': item['representationType'],
           'colorValue': item['colorValue'],
           'lineTotal': price * qty,
+          'total': price * qty,
         };
       }).toList();
 
@@ -895,6 +916,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         'grandTotal': total,
         'total': total,
         'amountReceived': amountReceived,
+        'amountPaid': amountReceived,
         'change': change,
         'publicReceiptUrl': publicReceiptUrl,
         'items': items,
@@ -998,7 +1020,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Future<Map<String, dynamic>?> _showPaymentSheet() async {
     final amountController = TextEditingController();
-    String paymentMode = 'Cash';
+
+    String paymentMode;
+    if (_acceptCashPayment) {
+      paymentMode = 'Cash';
+    } else if (_acceptGcashPayment) {
+      paymentMode = 'GCash';
+    } else {
+      amountController.dispose();
+      return null;
+    }
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
@@ -1011,6 +1042,18 @@ class _TransactionScreenState extends State<TransactionScreen> {
             final amountReceived =
                 double.tryParse(amountController.text.trim()) ?? 0.0;
             final change = amountReceived - total;
+
+            final enabledModes = <DropdownMenuItem<String>>[];
+            if (_acceptCashPayment) {
+              enabledModes.add(
+                const DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+              );
+            }
+            if (_acceptGcashPayment) {
+              enabledModes.add(
+                const DropdownMenuItem(value: 'GCash', child: Text('GCash')),
+              );
+            }
 
             return Container(
               padding: EdgeInsets.fromLTRB(
@@ -1061,15 +1104,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   ),
                   const SizedBox(height: 14),
                   DropdownButtonFormField<String>(
-                    initialValue: paymentMode,
-                    items: const [
-                      DropdownMenuItem(value: 'Cash', child: Text('Cash')),
-                      DropdownMenuItem(value: 'GCash', child: Text('GCash')),
-                    ],
+                    value: paymentMode,
+                    items: enabledModes,
                     onChanged: (value) {
                       if (value == null) return;
                       setModalState(() {
                         paymentMode = value;
+                        amountController.clear();
                       });
                     },
                     decoration: InputDecoration(
@@ -1082,25 +1123,23 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: amountController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    onChanged: (_) => setModalState(() {}),
-                    decoration: InputDecoration(
-                      labelText: paymentMode == 'Cash'
-                          ? 'Amount Received'
-                          : 'Reference Amount',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
+                  if (paymentMode == 'Cash') ...[
+                    TextField(
+                      controller: amountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: (_) => setModalState(() {}),
+                      decoration: InputDecoration(
+                        labelText: 'Amount Received',
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (paymentMode == 'Cash')
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         const Text(
@@ -1117,6 +1156,136 @@ class _TransactionScreenState extends State<TransactionScreen> {
                         ),
                       ],
                     ),
+                  ],
+                  if (paymentMode == 'GCash') ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Customer will scan this GCash QR',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: AspectRatio(
+                              aspectRatio: 1,
+                              child: (_gcashQrImageUrl.trim().isNotEmpty)
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: InteractiveViewer(
+                                        minScale: 1,
+                                        maxScale: 4,
+                                        child: Image.network(
+                                          _gcashQrImageUrl,
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (_, __, ___) {
+                                            return const Center(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.broken_image_outlined,
+                                                    size: 40,
+                                                    color: Colors.black45,
+                                                  ),
+                                                  SizedBox(height: 8),
+                                                  Text(
+                                                    'Failed to load GCash QR image',
+                                                    style: TextStyle(
+                                                      color: Colors.black54,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    )
+                                  : const Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.qr_code_2_rounded,
+                                            size: 42,
+                                            color: Colors.black45,
+                                          ),
+                                          SizedBox(height: 8),
+                                          Text(
+                                            'No GCash QR uploaded in Store Settings',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: Colors.black54,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (_gcashName.trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                'Account Name: $_gcashName',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          if (_gcashNumber.trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Text(
+                                'GCash Number: $_gcashNumber',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          Text(
+                            'Amount to Pay: ₱${total.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                              color: _navy,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Only press confirm after checking that the payment was received.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -1124,35 +1293,56 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     child: ElevatedButton(
                       onPressed: () {
                         final total = _cartTotal;
-                        final amountReceived =
-                            double.tryParse(amountController.text.trim()) ??
-                                0.0;
 
-                        if (amountReceived <= 0) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(
-                              content: Text('Enter a valid amount first.'),
-                            ),
-                          );
+                        if (paymentMode == 'Cash') {
+                          final amountReceived =
+                              double.tryParse(amountController.text.trim()) ??
+                                  0.0;
+
+                          if (amountReceived <= 0) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              const SnackBar(
+                                content: Text('Enter a valid amount first.'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (amountReceived < total) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              const SnackBar(
+                                content: Text('Amount received is not enough.'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          Navigator.pop(sheetContext, {
+                            'paymentMode': paymentMode,
+                            'amountReceived': amountReceived,
+                            'change': amountReceived - total,
+                          });
                           return;
                         }
 
-                        if (paymentMode == 'Cash' && amountReceived < total) {
-                          ScaffoldMessenger.of(sheetContext).showSnackBar(
-                            const SnackBar(
-                              content: Text('Amount received is not enough.'),
-                            ),
-                          );
-                          return;
-                        }
+                        if (paymentMode == 'GCash') {
+                          if (_gcashQrImageUrl.trim().isEmpty) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'No GCash QR uploaded in Store Settings.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
 
-                        Navigator.pop(sheetContext, {
-                          'paymentMode': paymentMode,
-                          'amountReceived': amountReceived,
-                          'change': paymentMode == 'Cash'
-                              ? amountReceived - total
-                              : 0.0,
-                        });
+                          Navigator.pop(sheetContext, {
+                            'paymentMode': paymentMode,
+                            'amountReceived': total,
+                            'change': 0.0,
+                          });
+                        }
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _teal,
@@ -1161,9 +1351,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                       ),
-                      child: const Text(
-                        'Confirm Transaction',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                      child: Text(
+                        paymentMode == 'GCash'
+                            ? 'Confirm GCash Payment'
+                            : 'Confirm Transaction',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
                   ),
