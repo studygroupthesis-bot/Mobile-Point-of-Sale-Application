@@ -458,6 +458,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
       'tax': tax,
       'taxAmount': tax,
       'grandTotal': grandTotal,
+      'grossTotal': grandTotal,
+      'refundTotal': 0.0,
+      'netTotal': grandTotal,
+      'hasRefund': false,
+      'refundedAt': null,
       'total': grandTotal,
       'amountReceived': amountReceived,
       'amountPaid': amountReceived,
@@ -963,6 +968,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           'colorValue': item['colorValue'],
           'lineTotal': double.parse((price * qty).toStringAsFixed(2)),
           'total': double.parse((price * qty).toStringAsFixed(2)),
+          'refundedQty': 0,
         };
       }).toList();
 
@@ -994,6 +1000,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
         'tax': tax,
         'taxAmount': tax,
         'grandTotal': grandTotal,
+        'grossTotal': grandTotal,
+        'refundTotal': 0.0,
+        'netTotal': grandTotal,
+        'hasRefund': false,
+        'refundedAt': null,
         'total': grandTotal,
         'amountReceived': double.parse(amountReceived.toStringAsFixed(2)),
         'amountPaid': double.parse(amountReceived.toStringAsFixed(2)),

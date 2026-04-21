@@ -32,10 +32,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   String? _storeId;
   DateTime _selectedDate = DateTime.now();
 
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _loadStoreContext();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadStoreContext() async {
@@ -88,11 +97,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     if (value == null) return 0;
     if (value is num) return value.toDouble();
 
-    final cleaned = value
-        .toString()
-        .replaceAll('₱', '')
-        .replaceAll(',', '')
-        .trim();
+    final cleaned =
+        value.toString().replaceAll('₱', '').replaceAll(',', '').trim();
 
     return double.tryParse(cleaned) ?? 0;
   }
@@ -100,6 +106,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   DateTime? _extractDate(Map<String, dynamic> data) {
     final possibleValues = [
       data['createdAt'],
+      data['createdAtLocal'],
       data['timestamp'],
       data['transactionDate'],
       data['dateCreated'],
@@ -139,6 +146,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       data['transactionId'],
       data['transactionNumber'],
       data['orderNumber'],
+      data['invoiceId'],
     ].firstWhere(
       (value) => value != null && value.toString().trim().isNotEmpty,
       orElse: () => '',
@@ -151,9 +159,30 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     return docId;
   }
 
+  String _extractInvoiceSearchText(String docId, Map<String, dynamic> data) {
+    final values = [
+      docId,
+      data['invoiceNumber'],
+      data['invoiceNo'],
+      data['receiptNumber'],
+      data['referenceNo'],
+      data['referenceNumber'],
+      data['transactionId'],
+      data['transactionNumber'],
+      data['orderNumber'],
+      data['invoiceId'],
+    ];
+
+    return values
+        .where((value) => value != null && value.toString().trim().isNotEmpty)
+        .map((value) => value.toString().trim().toLowerCase())
+        .join(' ');
+  }
+
   String _extractPaymentMethod(Map<String, dynamic> data) {
     final paymentMethod = [
       data['paymentMethod'],
+      data['paymentMode'],
       data['modeOfPayment'],
       data['paymentType'],
       data['tenderType'],
@@ -184,6 +213,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
   double _extractTotal(Map<String, dynamic> data) {
     final total = [
+      data['netTotal'],
       data['grandTotal'],
       data['totalAmount'],
       data['finalTotal'],
@@ -327,6 +357,48 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     );
   }
 
+  Widget _buildSearchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (value) {
+          setState(() {
+            _searchQuery = value.trim().toLowerCase();
+          });
+        },
+        decoration: InputDecoration(
+          hintText: 'Search invoice no. / invoice id',
+          prefixIcon: const Icon(Icons.search_rounded, color: _teal),
+          suffixIcon: _searchQuery.isEmpty
+              ? null
+              : IconButton(
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _searchQuery = '';
+                    });
+                  },
+                  icon: const Icon(Icons.close_rounded),
+                ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionHeader() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -379,6 +451,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   }
 
   Widget _buildEmptyState() {
+    final hasSearch = _searchQuery.isNotEmpty;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -386,18 +460,20 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
         color: _cardBg,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(
+          const Icon(
             Icons.receipt_long_outlined,
             size: 38,
             color: Colors.black38,
           ),
-          SizedBox(height: 10),
+          const SizedBox(height: 10),
           Text(
-            'No transactions found for this date.',
+            hasSearch
+                ? 'No transactions matched your invoice search.'
+                : 'No transactions found for this date.',
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.black54,
               fontWeight: FontWeight.w600,
             ),
@@ -507,7 +583,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       final data = doc.data();
       final date = _extractDate(data);
       if (date == null) return false;
-      return _isSameDate(date, _selectedDate);
+
+      final sameDate = _isSameDate(date, _selectedDate);
+      if (!sameDate) return false;
+
+      if (_searchQuery.isEmpty) return true;
+
+      final invoiceSearchText = _extractInvoiceSearchText(doc.id, data);
+      return invoiceSearchText.contains(_searchQuery);
     }).toList();
 
     filtered.sort((a, b) {
@@ -582,6 +665,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
             _buildHeader(),
             const SizedBox(height: 14),
             _buildSalesCard(totalSales),
+            const SizedBox(height: 14),
+            _buildSearchBar(),
             const SizedBox(height: 18),
             _buildSectionHeader(),
             const SizedBox(height: 12),

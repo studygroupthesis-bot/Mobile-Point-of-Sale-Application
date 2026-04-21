@@ -39,6 +39,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
 
   bool _processSales = true;
   bool _editCart = true;
+  bool _refundItems = false;
 
   bool _viewTransactions = true;
   bool _viewReceipts = true;
@@ -46,6 +47,9 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   bool _viewProfile = true;
 
   bool get isEdit => widget.staffUid != null;
+
+  static const Color _pageBg = Color(0xFFEAF6F4);
+  static const Color _teal = Color(0xFF2AA39A);
 
   @override
   void dispose() {
@@ -82,6 +86,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
 
     _processSales = perms['processSales'] ?? oldSales ?? true;
     _editCart = perms['editCart'] ?? oldSales ?? true;
+    _refundItems = perms['refundItems'] ?? false;
 
     _viewTransactions = perms['viewTransactions'] ?? oldTransactions ?? true;
     _viewReceipts = perms['viewReceipts'] ?? oldReceipts ?? true;
@@ -98,6 +103,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
         'pullOutStock': true,
         'processSales': true,
         'editCart': true,
+        'refundItems': true,
         'viewTransactions': true,
         'viewReceipts': true,
         'viewProfile': true,
@@ -111,6 +117,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
       'pullOutStock': _pullOutStock,
       'processSales': _processSales,
       'editCart': _editCart,
+      'refundItems': _refundItems,
       'viewTransactions': _viewTransactions,
       'viewReceipts': _viewReceipts,
       'viewProfile': _viewProfile,
@@ -247,9 +254,9 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFE79A9A),
+      backgroundColor: _pageBg,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _pageBg,
         elevation: 0,
         leading: const BackButton(color: Colors.black),
         title: Text(
@@ -349,6 +356,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           ),
           const SizedBox(height: 12),
           SwitchListTile(
+            activeColor: _teal,
             value: _isActive,
             onChanged: _saving
                 ? null
@@ -360,6 +368,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(
+            activeColor: _teal,
             value: _mustChangePassword,
             onChanged: _saving
                 ? null
@@ -426,6 +435,11 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
               value: _editCart,
               onChanged: (v) => setState(() => _editCart = v),
             ),
+            _permTile(
+              title: 'Refund Items',
+              value: _refundItems,
+              onChanged: (v) => setState(() => _refundItems = v),
+            ),
             const SizedBox(height: 10),
             const Text(
               'Records',
@@ -479,7 +493,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2AA39A),
+                backgroundColor: _teal,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(25),
@@ -514,6 +528,7 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           Transform.scale(
             scale: 0.88,
             child: Checkbox(
+              activeColor: _teal,
               value: value,
               onChanged: _saving ? null : (v) => onChanged(v ?? false),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,

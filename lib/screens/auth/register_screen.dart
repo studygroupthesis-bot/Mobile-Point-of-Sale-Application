@@ -40,21 +40,105 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return emailRegex.hasMatch(value);
   }
 
+  bool _hasMinLength(String value) => value.length >= 8;
+  bool _hasMaxLength(String value) => value.length <= 20;
   bool _hasUppercase(String value) => RegExp(r'[A-Z]').hasMatch(value);
   bool _hasLowercase(String value) => RegExp(r'[a-z]').hasMatch(value);
   bool _hasNumber(String value) => RegExp(r'[0-9]').hasMatch(value);
   bool _hasSpecialChar(String value) =>
       RegExp(r'[!@#$%^&*(),.?":{}|<>_+=\-\\/]').hasMatch(value);
-  bool _hasMinLength(String value) => value.length >= 8;
+
+  bool _hasLettersNumbersAndSpecial(String value) {
+    return _hasLowercase(value) &&
+        _hasNumber(value) &&
+        _hasSpecialChar(value);
+  }
 
   String? _validatePassword(String value) {
     if (value.isEmpty) return "Password is required";
-    if (!_hasMinLength(value)) return "Password must be at least 8 characters";
-    if (!_hasUppercase(value)) return "Add at least one uppercase letter";
-    if (!_hasLowercase(value)) return "Add at least one lowercase letter";
-    if (!_hasNumber(value)) return "Add at least one number";
-    if (!_hasSpecialChar(value)) return "Add at least one special character";
+
+    if (!_hasMinLength(value) || !_hasMaxLength(value)) {
+      return "Password must be 8 to 20 characters";
+    }
+
+    if (!_hasUppercase(value)) {
+      return "Add at least one uppercase letter";
+    }
+
+    if (!_hasLettersNumbersAndSpecial(value)) {
+      return "Use letters, numbers, and special characters";
+    }
+
     return null;
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Widget _ruleItem(String text, bool passed) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.check,
+              size: 16,
+              color: passed ? const Color(0xFF11C98D) : Colors.grey,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              softWrap: true,
+              overflow: TextOverflow.visible,
+              style: TextStyle(
+                color: passed ? const Color(0xFF11C98D) : Colors.grey,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _passwordGuide() {
+    final value = password.text.trim();
+
+    final lengthPassed = _hasMinLength(value) && _hasMaxLength(value);
+    final mixPassed =
+        _hasLettersNumbersAndSpecial(value) && _hasUppercase(value);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 10, bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Your password must have:",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _ruleItem("8 to 20 characters", lengthPassed),
+          _ruleItem("Letters, numbers, and special characters", mixPassed),
+        ],
+      ),
+    );
   }
 
   Future<void> register() async {
@@ -82,10 +166,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final passwordError = _validatePassword(passwordText);
     if (passwordError != null) {
       setState(() {
-        _passwordError = passwordError;
         _showPasswordGuide = true;
+        _passwordError = passwordError;
       });
-      _showMessage(passwordError);
       return;
     }
 
@@ -159,77 +242,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
-  Widget _buildPasswordRule(String text, bool passed) {
-    return Row(
-      children: [
-        Icon(
-          passed ? Icons.check_circle : Icons.cancel,
-          size: 18,
-          color: passed ? Colors.green : Colors.red,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          text,
-          style: TextStyle(
-            color: passed ? Colors.green.shade700 : Colors.red.shade700,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _passwordGuideCard() {
-    final value = password.text.trim();
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.only(top: 8, bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.red.shade200),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Password must contain:",
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _buildPasswordRule("At least 8 characters", _hasMinLength(value)),
-          const SizedBox(height: 6),
-          _buildPasswordRule("One uppercase letter", _hasUppercase(value)),
-          const SizedBox(height: 6),
-          _buildPasswordRule("One lowercase letter", _hasLowercase(value)),
-          const SizedBox(height: 6),
-          _buildPasswordRule("One number", _hasNumber(value)),
-          const SizedBox(height: 6),
-          _buildPasswordRule("One special character", _hasSpecialChar(value)),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -296,7 +308,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.person,
                               ),
                               SizedBox(height: fieldGap),
-
                               _label("Email"),
                               CustomTextField(
                                 controller: email,
@@ -305,51 +316,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.email,
                               ),
                               SizedBox(height: fieldGap),
-
                               _label("Password"),
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: _passwordError != null
-                                        ? Colors.red
-                                        : Colors.transparent,
-                                    width: 1.4,
-                                  ),
-                                ),
-                                child: CustomTextField(
-                                  controller: password,
-                                  label: "Password",
-                                  hintText: "••••••••",
-                                  icon: Icons.lock,
-                                  isPassword: true,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _showPasswordGuide = value.isNotEmpty;
-                                      _passwordError = _validatePassword(value);
-                                    });
-                                  },
-                                ),
+                              CustomTextField(
+                                controller: password,
+                                label: "Password",
+                                hintText: "••••••••",
+                                icon: Icons.lock,
+                                isPassword: true,
+                                errorText: password.text.trim().isNotEmpty
+                                    ? _passwordError
+                                    : null,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _showPasswordGuide = value.isNotEmpty;
+                                    _passwordError = _validatePassword(value);
+                                  });
+                                },
                               ),
-
-                              if (_showPasswordGuide) _passwordGuideCard(),
-
-                              if (_passwordError != null &&
-                                  password.text.trim().isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    _passwordError!,
-                                    style: const TextStyle(
-                                      color: Colors.red,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-
+                              if (_showPasswordGuide) _passwordGuide(),
                               SizedBox(height: fieldGap),
-
                               _label("Confirm Password"),
                               CustomTextField(
                                 controller: confirm,
@@ -357,9 +342,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 hintText: "••••••••",
                                 icon: Icons.lock,
                                 isPassword: true,
+                                errorText: confirm.text.trim().isNotEmpty &&
+                                        confirm.text.trim() !=
+                                            password.text.trim()
+                                    ? "Passwords do not match"
+                                    : null,
+                                onChanged: (_) {
+                                  setState(() {});
+                                },
                               ),
                               SizedBox(height: fieldGap),
-
                               _label("Business Name"),
                               CustomTextField(
                                 controller: business,
@@ -368,7 +360,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.business_center,
                               ),
                               SizedBox(height: isSmallPhone ? 12 : 14),
-
                               Center(
                                 child: SizedBox(
                                   width: buttonWidth,

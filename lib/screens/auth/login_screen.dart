@@ -7,6 +7,7 @@ import 'register_screen.dart';
 import 'verify_email_screen.dart';
 import 'forgot_password_screen.dart';
 import 'admin_email_verification_screen.dart';
+import '../../services/emailjs_service.dart';
 import '../../app/app.dart';
 import '../../services/auth_service.dart';
 import '../profile/change_password_screen.dart';
@@ -127,31 +128,38 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (role == 'admin') {
-        final code =
-            (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
-                .toString();
+      final code =
+          (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
+              .toString();
 
-        await FirebaseFirestore.instance
-            .collection('admin_login_codes')
-            .doc(user.uid)
-            .set({
-          'email': user.email ?? email.text.trim(),
-          'code': code,
-          'used': false,
-          'expiresAt': Timestamp.fromDate(
-            DateTime.now().add(const Duration(minutes: 5)),
-          ),
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+      final adminEmail = user.email ?? email.text.trim();
 
-        _goTo(
-          AdminEmailVerificationScreen(
-            uid: user.uid,
-            email: user.email ?? email.text.trim(),
-          ),
-        );
-        return;
-      }
+      await FirebaseFirestore.instance
+          .collection('admin_login_codes')
+          .doc(user.uid)
+          .set({
+        'email': adminEmail,
+        'code': code,
+        'used': false,
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().add(const Duration(minutes: 5)),
+        ),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await EmailJsService.sendAdminCode(
+        toEmail: adminEmail,
+        code: code,
+      );
+
+      _goTo(
+        AdminEmailVerificationScreen(
+          uid: user.uid,
+          email: adminEmail,
+        ),
+      );
+      return;
+    }
 
       _goTo(const PopPayApp());
     } on FirebaseAuthException catch (e) {
@@ -244,32 +252,39 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      if (role == 'admin') {
-        final code =
-            (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
-                .toString();
+     if (role == 'admin') {
+      final code =
+          (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
+              .toString();
 
-        await FirebaseFirestore.instance
-            .collection('admin_login_codes')
-            .doc(currentUser.uid)
-            .set({
-          'email': currentUser.email ?? '',
-          'code': code,
-          'used': false,
-          'expiresAt': Timestamp.fromDate(
-            DateTime.now().add(const Duration(minutes: 5)),
-          ),
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+      final adminEmail = currentUser.email ?? '';
 
-        _goTo(
-          AdminEmailVerificationScreen(
-            uid: currentUser.uid,
-            email: currentUser.email ?? '',
-          ),
-        );
-        return;
-      }
+      await FirebaseFirestore.instance
+          .collection('admin_login_codes')
+          .doc(currentUser.uid)
+          .set({
+        'email': adminEmail,
+        'code': code,
+        'used': false,
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().add(const Duration(minutes: 5)),
+        ),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await EmailJsService.sendAdminCode(
+        toEmail: adminEmail,
+        code: code,
+      );
+
+      _goTo(
+        AdminEmailVerificationScreen(
+          uid: currentUser.uid,
+          email: adminEmail,
+        ),
+      );
+      return;
+    }
 
       _goTo(const PopPayApp());
     } on FirebaseAuthException catch (e) {
