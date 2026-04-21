@@ -25,14 +25,13 @@ class StoreStaffService {
         .snapshots();
   }
 
-  /// Admin creates staff auth account WITHOUT logging out admin (secondary app)
   Future<void> createStaff({
     required String storeId,
     required String name,
     required String email,
     required String password,
     required String phone,
-    required String role, // "staff" or "admin"
+    required String role,
     required Map<String, dynamic> permissions,
   }) async {
     FirebaseApp secondary;
@@ -52,14 +51,18 @@ class StoreStaffService {
       password: password.trim(),
     );
 
-    final newUid = cred.user!.uid;
+    final newUser = cred.user;
+    if (newUser == null) {
+      throw Exception('Failed to create staff account.');
+    }
 
-    // Sign out secondary so admin stays logged in
+    final newUid = newUser.uid;
+
+    await newUser.sendEmailVerification();
     await secondaryAuth.signOut();
 
     final now = FieldValue.serverTimestamp();
 
-    // 1) Global user profile doc
     await _db.collection('users').doc(newUid).set({
       'uid': newUid,
       'storeId': storeId,
@@ -69,11 +72,12 @@ class StoreStaffService {
       'role': role,
       'permissions': permissions,
       'isActive': true,
+      'mustChangePassword': true,
+      'passwordLastChangedAt': now,
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
 
-    // 2) Store staff list
     await _db
         .collection('stores')
         .doc(storeId)
@@ -87,6 +91,8 @@ class StoreStaffService {
       'role': role,
       'permissions': permissions,
       'isActive': true,
+      'mustChangePassword': true,
+      'passwordLastChangedAt': now,
       'created_at': now,
       'updated_at': now,
     }, SetOptions(merge: true));
@@ -99,39 +105,105 @@ class StoreStaffService {
     required String phone,
     required String role,
     required Map<String, dynamic> permissions,
+    required bool isActive,
+    required bool mustChangePassword,
   }) async {
     final now = FieldValue.serverTimestamp();
 
-    // Update store staff doc
+    final updateData = {
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'role': role,
+      'permissions': permissions,
+      'isActive': isActive,
+      'mustChangePassword': mustChangePassword,
+      'updated_at': now,
+    };
+
+    await _db
+        .collection('stores')
+        .doc(storeId)
+        .collection('staff')
+        .doc(uid)
+        .set(updateData, SetOptions(merge: true));
+
+    await _db
+        .collection('users')
+        .doc(uid)
+        .set(updateData, SetOptions(merge: true));
+  }
+
+  Future<void> setMemberActiveStatus({
+    required String storeId,
+    required String uid,
+    required bool isActive,
+  }) async {
+    final now = FieldValue.serverTimestamp();
+
     await _db
         .collection('stores')
         .doc(storeId)
         .collection('staff')
         .doc(uid)
         .set({
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'role': role,
-      'permissions': permissions,
+      'isActive': isActive,
       'updated_at': now,
     }, SetOptions(merge: true));
 
-    // Keep users doc in sync
     await _db.collection('users').doc(uid).set({
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'role': role,
-      'permissions': permissions,
+      'isActive': isActive,
       'updated_at': now,
     }, SetOptions(merge: true));
+  }
+
+  Future<void> forcePasswordReset({
+    required String storeId,
+    required String uid,
+  }) async {
+    final now = FieldValue.serverTimestamp();
+
+    await _db
+        .collection('stores')
+        .doc(storeId)
+        .collection('staff')
+        .doc(uid)
+        .set({
+      'mustChangePassword': true,
+      'updated_at': now,
+    }, SetOptions(merge: true));
+
+    await _db.collection('users').doc(uid).set({
+      'mustChangePassword': true,
+      'updated_at': now,
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> deactivateMember({
+    required String storeId,
+    required String uid,
+  }) async {
+    await setMemberActiveStatus(
+      storeId: storeId,
+      uid: uid,
+      isActive: false,
+    );
+  }
+
+  Future<void> activateMember({
+    required String storeId,
+    required String uid,
+  }) async {
+    await setMemberActiveStatus(
+      storeId: storeId,
+      uid: uid,
+      isActive: true,
+    );
   }
 
   Future<void> deleteMember({
     required String storeId,
     required String uid,
   }) async {
-    // Removes Firestore store staff record only.
-    // Deleting FirebaseAuth user requires Admin SDK / Cloud Function.
     await _db
         .collection('stores')
         .doc(storeId)

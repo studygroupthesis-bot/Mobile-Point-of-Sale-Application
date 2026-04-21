@@ -6,10 +6,10 @@ class StoreService {
   Future<String> createStoreForOwner({
     required String ownerUid,
     required String email,
-    required String ownerName, // ✅ NEW
+    required String ownerName,
     required String businessName,
   }) async {
-    final storeRef = _db.collection('stores').doc(); // auto storeId
+    final storeRef = _db.collection('stores').doc();
 
     await storeRef.set({
       'storeId': storeRef.id,
@@ -18,7 +18,7 @@ class StoreService {
       'address': '',
       'accept_cash': true,
       'accept_gcash': false,
-      'logo_url': '', // ✅ keep as String
+      'logo_url': '',
       'created_at': FieldValue.serverTimestamp(),
       'updated_at': FieldValue.serverTimestamp(),
     });
@@ -26,10 +26,13 @@ class StoreService {
     await _db.collection('users').doc(ownerUid).set({
       'uid': ownerUid,
       'email': email,
-      'name': ownerName, // ✅ user name
+      'name': ownerName,
       'role': 'admin',
       'storeId': storeRef.id,
       'phone': '',
+      'isActive': true,
+      'mustChangePassword': false,
+      'passwordLastChangedAt': FieldValue.serverTimestamp(),
       'created_at': FieldValue.serverTimestamp(),
       'updated_at': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));

@@ -88,6 +88,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
   String _gcashName = '';
   String _gcashNumber = '';
 
+  bool _taxEnabled = false;
+  bool _taxInclusive = true;
+  String _taxName = 'VAT';
+  double _taxRate = 0.0;
+
   final List<Map<String, dynamic>> _cartItems = [];
   List<DocumentSnapshot<Map<String, dynamic>>> _liveSuggestions = [];
 
@@ -180,6 +185,20 @@ class _TransactionScreenState extends State<TransactionScreen> {
             '';
         _gcashName = (storeData['gcashName'] as String?) ?? '';
         _gcashNumber = (storeData['gcashNumber'] as String?) ?? '';
+
+        _taxEnabled = (storeData['tax_enabled'] as bool?) ??
+            (storeData['taxEnabled'] as bool?) ??
+            false;
+        _taxInclusive = (storeData['tax_inclusive'] as bool?) ??
+            (storeData['taxInclusive'] as bool?) ??
+            true;
+        _taxName = (storeData['tax_name'] as String?) ??
+            (storeData['taxName'] as String?) ??
+            'VAT';
+        _taxRate = _toDouble(
+          storeData['tax_rate'] ?? storeData['taxRate'] ?? 0,
+        );
+
         _loading = false;
       });
     } catch (e) {
@@ -328,7 +347,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return 5;
   }
 
-  double get _cartTotal {
+  double get _cartSubtotal {
     double total = 0;
     for (final item in _cartItems) {
       final price = _toDouble(item['price']);
@@ -336,6 +355,48 @@ class _TransactionScreenState extends State<TransactionScreen> {
       total += price * qty;
     }
     return total;
+  }
+
+  Map<String, double> _computeTax(double subtotal) {
+    final safeSubtotal = double.parse(subtotal.toStringAsFixed(2));
+
+    if (!_taxEnabled || _taxRate <= 0) {
+      return {
+        'subtotal': safeSubtotal,
+        'taxableSales': safeSubtotal,
+        'tax': 0.0,
+        'grandTotal': safeSubtotal,
+      };
+    }
+
+    final rateDecimal = _taxRate / 100;
+
+    if (_taxInclusive) {
+      final rawTax = safeSubtotal * (rateDecimal / (1 + rateDecimal));
+      final rawTaxableSales = safeSubtotal - rawTax;
+
+      return {
+        'subtotal': safeSubtotal,
+        'taxableSales': double.parse(rawTaxableSales.toStringAsFixed(2)),
+        'tax': double.parse(rawTax.toStringAsFixed(2)),
+        'grandTotal': safeSubtotal,
+      };
+    } else {
+      final rawTax = safeSubtotal * rateDecimal;
+      final rawGrandTotal = safeSubtotal + rawTax;
+
+      return {
+        'subtotal': safeSubtotal,
+        'taxableSales': safeSubtotal,
+        'tax': double.parse(rawTax.toStringAsFixed(2)),
+        'grandTotal': double.parse(rawGrandTotal.toStringAsFixed(2)),
+      };
+    }
+  }
+
+  double get _cartTotal {
+    final taxResult = _computeTax(_cartSubtotal);
+    return taxResult['grandTotal'] ?? _cartSubtotal;
   }
 
   int get _cartItemCount {
@@ -355,7 +416,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Future<void> _savePublicReceipt({
-    required String storeId,  
+    required String storeId,
     required String transactionId,
     required String invoiceNo,
     required String cashierUid,
@@ -849,10 +910,29 @@ class _TransactionScreenState extends State<TransactionScreen> {
       return;
     }
 
-    final total = _cartTotal;
-    final amountReceived = paymentResult['amountReceived'] as double;
+    final subtotal = double.parse(_cartSubtotal.toStringAsFixed(2));
+    final taxResult = _computeTax(subtotal);
+
+    final taxableSales = taxResult['taxableSales'] ?? subtotal;
+    final tax = taxResult['tax'] ?? 0.0;
+    final grandTotal = taxResult['grandTotal'] ?? subtotal;
+
     final paymentMode = paymentResult['paymentMode'] as String;
-    final change = paymentResult['change'] as double;
+    double amountReceived = paymentResult['amountReceived'] as double;
+    double change = paymentResult['change'] as double;
+
+    if (paymentMode == 'Cash') {
+      if (amountReceived < grandTotal) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Amount received is not enough.')),
+        );
+        return;
+      }
+      change = double.parse((amountReceived - grandTotal).toStringAsFixed(2));
+    } else {
+      amountReceived = grandTotal;
+      change = 0.0;
+    }
 
     setState(() => _savingTransaction = true);
 
@@ -873,7 +953,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         return {
           'itemId': item['itemId'],
           'name': item['name'],
-          'price': price,
+          'price': double.parse(price.toStringAsFixed(2)),
           'qty': qty,
           'barcode': item['barcode'],
           'soldBy': item['soldBy'] ?? 'each',
@@ -881,8 +961,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
           'imageUrl': item['imageUrl'],
           'representationType': item['representationType'],
           'colorValue': item['colorValue'],
-          'lineTotal': price * qty,
-          'total': price * qty,
+          'lineTotal': double.parse((price * qty).toStringAsFixed(2)),
+          'total': double.parse((price * qty).toStringAsFixed(2)),
         };
       }).toList();
 
@@ -905,19 +985,19 @@ class _TransactionScreenState extends State<TransactionScreen> {
         'createdAtLocal': now.toIso8601String(),
         'paymentMode': paymentMode,
         'paymentMethod': paymentMode,
-        'subtotal': total,
-        'taxableSales': total,
-        'taxEnabled': false,
-        'taxName': 'VAT',
-        'taxRate': 12.0,
-        'taxInclusive': true,
-        'tax': 0.0,
-        'taxAmount': 0.0,
-        'grandTotal': total,
-        'total': total,
-        'amountReceived': amountReceived,
-        'amountPaid': amountReceived,
-        'change': change,
+        'subtotal': subtotal,
+        'taxableSales': taxableSales,
+        'taxEnabled': _taxEnabled,
+        'taxName': _taxName,
+        'taxRate': _taxRate,
+        'taxInclusive': _taxInclusive,
+        'tax': tax,
+        'taxAmount': tax,
+        'grandTotal': grandTotal,
+        'total': grandTotal,
+        'amountReceived': double.parse(amountReceived.toStringAsFixed(2)),
+        'amountPaid': double.parse(amountReceived.toStringAsFixed(2)),
+        'change': double.parse(change.toStringAsFixed(2)),
         'publicReceiptUrl': publicReceiptUrl,
         'items': items,
       });
@@ -949,16 +1029,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
         invoiceNo: invoiceNo,
         cashierUid: user.uid,
         paymentMode: paymentMode,
-        subtotal: total,
-        taxableSales: total,
-        taxEnabled: false,
-        taxName: 'VAT',
-        taxRate: 12.0,
-        taxInclusive: true,
-        tax: 0.0,
-        grandTotal: total,
-        amountReceived: amountReceived,
-        change: change,
+        subtotal: subtotal,
+        taxableSales: taxableSales,
+        taxEnabled: _taxEnabled,
+        taxName: _taxName,
+        taxRate: _taxRate,
+        taxInclusive: _taxInclusive,
+        tax: tax,
+        grandTotal: grandTotal,
+        amountReceived: double.parse(amountReceived.toStringAsFixed(2)),
+        change: double.parse(change.toStringAsFixed(2)),
         items: items,
         storeName: resolvedStoreName,
         now: now,
@@ -971,16 +1051,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
         dateTime: now,
         paymentMode: paymentMode,
         cashierUid: user.uid,
-        subtotal: total,
-        taxableSales: total,
-        taxEnabled: false,
-        taxName: 'VAT',
-        taxRate: 12.0,
-        taxInclusive: true,
-        tax: 0.0,
-        grandTotal: total,
-        amountReceived: amountReceived,
-        change: change,
+        subtotal: subtotal,
+        taxableSales: taxableSales,
+        taxEnabled: _taxEnabled,
+        taxName: _taxName,
+        taxRate: _taxRate,
+        taxInclusive: _taxInclusive,
+        tax: tax,
+        grandTotal: grandTotal,
+        amountReceived: double.parse(amountReceived.toStringAsFixed(2)),
+        change: double.parse(change.toStringAsFixed(2)),
         items: items.map((item) {
           return ReceiptLine(
             name: (item['name'] ?? '').toString(),
@@ -1038,7 +1118,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final total = _cartTotal;
+            final subtotal = _cartSubtotal;
+            final taxResult = _computeTax(subtotal);
+            final total = taxResult['grandTotal'] ?? subtotal;
             final amountReceived =
                 double.tryParse(amountController.text.trim()) ?? 0.0;
             final change = amountReceived - total;
@@ -1084,20 +1166,54 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Row(
+                    child: Column(
                       children: [
-                        const Text(
-                          'Total Amount',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                        Row(
+                          children: [
+                            const Text(
+                              'Subtotal',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const Spacer(),
+                            Text('₱${subtotal.toStringAsFixed(2)}'),
+                          ],
                         ),
-                        const Spacer(),
-                        Text(
-                          '₱${total.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                            color: _navy,
+                        if (_taxEnabled) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Text(
+                                _taxInclusive
+                                    ? '$_taxName (${_taxRate.toStringAsFixed(0)}% Inclusive)'
+                                    : '$_taxName (${_taxRate.toStringAsFixed(0)}%)',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '₱${(taxResult['tax'] ?? 0).toStringAsFixed(2)}',
+                              ),
+                            ],
                           ),
+                        ],
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Text(
+                              'Total Amount',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '₱${total.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 18,
+                                color: _navy,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1292,7 +1408,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     height: 50,
                     child: ElevatedButton(
                       onPressed: () {
-                        final total = _cartTotal;
+                        final subtotal = _cartSubtotal;
+                        final taxResult = _computeTax(subtotal);
+                        final total = taxResult['grandTotal'] ?? subtotal;
 
                         if (paymentMode == 'Cash') {
                           final amountReceived =
@@ -1319,8 +1437,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
                           Navigator.pop(sheetContext, {
                             'paymentMode': paymentMode,
-                            'amountReceived': amountReceived,
-                            'change': amountReceived - total,
+                            'amountReceived':
+                                double.parse(amountReceived.toStringAsFixed(2)),
+                            'change': double.parse(
+                              (amountReceived - total).toStringAsFixed(2),
+                            ),
                           });
                           return;
                         }
@@ -1339,7 +1460,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
                           Navigator.pop(sheetContext, {
                             'paymentMode': paymentMode,
-                            'amountReceived': total,
+                            'amountReceived':
+                                double.parse(total.toStringAsFixed(2)),
                             'change': 0.0,
                           });
                         }
@@ -1723,6 +1845,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Widget _buildBottomSummary() {
+    final subtotal = _cartSubtotal;
+    final taxResult = _computeTax(subtotal);
+    final tax = taxResult['tax'] ?? 0.0;
+    final grandTotal = taxResult['grandTotal'] ?? subtotal;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -1756,6 +1883,42 @@ class _TransactionScreenState extends State<TransactionScreen> {
           Row(
             children: [
               const Text(
+                'Subtotal',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '₱${subtotal.toStringAsFixed(2)}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          if (_taxEnabled) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  _taxInclusive
+                      ? '$_taxName (${_taxRate.toStringAsFixed(0)}% Incl.)'
+                      : '$_taxName (${_taxRate.toStringAsFixed(0)}%)',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '₱${tax.toStringAsFixed(2)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
                 'Total',
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
@@ -1764,7 +1927,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
               ),
               const Spacer(),
               Text(
-                '₱${_cartTotal.toStringAsFixed(2)}',
+                '₱${grandTotal.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 18,

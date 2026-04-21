@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'widget/custom_text_field.dart';
 import 'register_screen.dart';
 import 'verify_email_screen.dart';
 import 'forgot_password_screen.dart';
+import 'admin_email_verification_screen.dart';
 import '../../app/app.dart';
 import '../../services/auth_service.dart';
+import '../profile/change_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,6 +21,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
+
   bool loading = false;
   bool googleLoading = false;
 
@@ -27,18 +32,29 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void _goTo(Widget screen) {
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+    );
+  }
+
   Future<void> login() async {
     if (email.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email is required")),
-      );
+      _showMessage("Email is required");
       return;
     }
 
     if (password.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Password is required")),
-      );
+      _showMessage("Password is required");
       return;
     }
 
@@ -53,34 +69,92 @@ class _LoginScreenState extends State<LoginScreen> {
       await cred.user?.reload();
       final user = FirebaseAuth.instance.currentUser;
 
-      if (!mounted) return;
-
       if (user == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Login failed. User not found.")),
-        );
+        _showMessage("Login failed. User not found.");
         return;
       }
 
       if (!user.emailVerified) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => VerifyEmailScreen(
-              email: user.email ?? email.text.trim(),
-            ),
+        _goTo(
+          VerifyEmailScreen(
+            email: user.email ?? email.text.trim(),
           ),
         );
         return;
       }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const PopPayApp()),
-      );
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
 
+      if (!userDoc.exists || userDoc.data() == null) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("User profile not found.");
+        return;
+      }
+
+      final data = userDoc.data()!;
+      final isActive = (data['isActive'] as bool?) ?? true;
+      final mustChangePassword =
+          (data['mustChangePassword'] as bool?) ?? false;
+      final passwordLastChangedAt =
+          data['passwordLastChangedAt'] as Timestamp?;
+      final role = (data['role'] as String?) ?? '';
+
+      if (!isActive) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("Your account is inactive. Please contact admin.");
+        return;
+      }
+
+      if (role.isEmpty) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("User role is missing.");
+        return;
+      }
+
+      bool passwordExpired = false;
+      if (passwordLastChangedAt != null) {
+        final lastChanged = passwordLastChangedAt.toDate();
+        passwordExpired =
+            DateTime.now().difference(lastChanged).inDays >= 90;
+      }
+
+      if (mustChangePassword || passwordExpired) {
+        _goTo(const ChangePasswordScreen(isForcedChange: true));
+        return;
+      }
+
+      if (role == 'admin') {
+        final code =
+            (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
+                .toString();
+
+        await FirebaseFirestore.instance
+            .collection('admin_login_codes')
+            .doc(user.uid)
+            .set({
+          'email': user.email ?? email.text.trim(),
+          'code': code,
+          'used': false,
+          'expiresAt': Timestamp.fromDate(
+            DateTime.now().add(const Duration(minutes: 5)),
+          ),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        _goTo(
+          AdminEmailVerificationScreen(
+            uid: user.uid,
+            email: user.email ?? email.text.trim(),
+          ),
+        );
+        return;
+      }
+
+      _goTo(const PopPayApp());
+    } on FirebaseAuthException catch (e) {
       String message = e.message ?? "Login failed";
 
       if (e.code == 'user-not-found') {
@@ -93,15 +167,9 @@ class _LoginScreenState extends State<LoginScreen> {
         message = "Invalid email or password.";
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      _showMessage(message);
     } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login failed: $e")),
-      );
+      _showMessage("Login failed: $e");
     } finally {
       if (mounted) {
         setState(() => loading = false);
@@ -123,15 +191,88 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      if (!mounted) return;
+      await user.reload();
+      final currentUser = FirebaseAuth.instance.currentUser;
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const PopPayApp()),
-      );
+      if (currentUser == null) {
+        throw FirebaseAuthException(
+          code: 'google-user-null',
+          message: 'Google sign-in failed.',
+        );
+      }
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      if (!userDoc.exists || userDoc.data() == null) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("User profile not found for this Google account.");
+        return;
+      }
+
+      final data = userDoc.data()!;
+      final isActive = (data['isActive'] as bool?) ?? true;
+      final mustChangePassword =
+          (data['mustChangePassword'] as bool?) ?? false;
+      final passwordLastChangedAt =
+          data['passwordLastChangedAt'] as Timestamp?;
+      final role = (data['role'] as String?) ?? '';
+
+      if (!isActive) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("Your account is inactive. Please contact admin.");
+        return;
+      }
+
+      if (role.isEmpty) {
+        await FirebaseAuth.instance.signOut();
+        _showMessage("User role is missing.");
+        return;
+      }
+
+      bool passwordExpired = false;
+      if (passwordLastChangedAt != null) {
+        final lastChanged = passwordLastChangedAt.toDate();
+        passwordExpired =
+            DateTime.now().difference(lastChanged).inDays >= 90;
+      }
+
+      if (mustChangePassword || passwordExpired) {
+        _goTo(const ChangePasswordScreen(isForcedChange: true));
+        return;
+      }
+
+      if (role == 'admin') {
+        final code =
+            (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
+                .toString();
+
+        await FirebaseFirestore.instance
+            .collection('admin_login_codes')
+            .doc(currentUser.uid)
+            .set({
+          'email': currentUser.email ?? '',
+          'code': code,
+          'used': false,
+          'expiresAt': Timestamp.fromDate(
+            DateTime.now().add(const Duration(minutes: 5)),
+          ),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        _goTo(
+          AdminEmailVerificationScreen(
+            uid: currentUser.uid,
+            email: currentUser.email ?? '',
+          ),
+        );
+        return;
+      }
+
+      _goTo(const PopPayApp());
     } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-
       String message = e.message ?? 'Google sign-in failed.';
 
       if (e.code == 'google-sign-in-cancelled') {
@@ -142,15 +283,9 @@ class _LoginScreenState extends State<LoginScreen> {
         message = 'Invalid Google credential.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      _showMessage(message);
     } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Google sign-in failed: $e")),
-      );
+      _showMessage("Google sign-in failed: $e");
     } finally {
       if (mounted) {
         setState(() => googleLoading = false);
@@ -176,7 +311,8 @@ class _LoginScreenState extends State<LoginScreen> {
             final loginButtonWidth = isSmallPhone ? 130.0 : 146.0;
 
             return SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
@@ -270,7 +406,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF309E95),
                                       shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(15),
+                                        borderRadius:
+                                            BorderRadius.circular(15),
                                       ),
                                       padding: EdgeInsets.zero,
                                     ),
@@ -315,7 +452,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               const SizedBox(height: 20),
                               Center(
                                 child: GestureDetector(
-                                  onTap: googleLoading ? null : signInWithGoogle,
+                                  onTap:
+                                      googleLoading ? null : signInWithGoogle,
                                   child: googleLoading
                                       ? const SizedBox(
                                           width: 45,
@@ -337,7 +475,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   onTap: () => Navigator.pushReplacement(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (_) => const RegisterScreen(),
+                                      builder: (_) =>
+                                          const RegisterScreen(),
                                     ),
                                   ),
                                   child: const Text(

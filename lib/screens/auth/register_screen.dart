@@ -22,39 +22,85 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   bool loading = false;
 
+  bool _showPasswordGuide = false;
+  String? _passwordError;
+
+  @override
+  void dispose() {
+    name.dispose();
+    email.dispose();
+    password.dispose();
+    confirm.dispose();
+    business.dispose();
+    super.dispose();
+  }
+
+  bool _isValidEmail(String value) {
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    return emailRegex.hasMatch(value);
+  }
+
+  bool _hasUppercase(String value) => RegExp(r'[A-Z]').hasMatch(value);
+  bool _hasLowercase(String value) => RegExp(r'[a-z]').hasMatch(value);
+  bool _hasNumber(String value) => RegExp(r'[0-9]').hasMatch(value);
+  bool _hasSpecialChar(String value) =>
+      RegExp(r'[!@#$%^&*(),.?":{}|<>_+=\-\\/]').hasMatch(value);
+  bool _hasMinLength(String value) => value.length >= 8;
+
+  String? _validatePassword(String value) {
+    if (value.isEmpty) return "Password is required";
+    if (!_hasMinLength(value)) return "Password must be at least 8 characters";
+    if (!_hasUppercase(value)) return "Add at least one uppercase letter";
+    if (!_hasLowercase(value)) return "Add at least one lowercase letter";
+    if (!_hasNumber(value)) return "Add at least one number";
+    if (!_hasSpecialChar(value)) return "Add at least one special character";
+    return null;
+  }
+
   Future<void> register() async {
-    if (name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Name is required")),
-      );
+    final fullName = name.text.trim();
+    final emailText = email.text.trim();
+    final passwordText = password.text.trim();
+    final confirmText = confirm.text.trim();
+    final businessName = business.text.trim();
+
+    if (fullName.isEmpty) {
+      _showMessage("Name is required");
       return;
     }
 
-    if (email.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email is required")),
-      );
+    if (emailText.isEmpty) {
+      _showMessage("Email is required");
       return;
     }
 
-    if (password.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Password is required")),
-      );
+    if (!_isValidEmail(emailText)) {
+      _showMessage("Please enter a valid email address");
       return;
     }
 
-    if (password.text.trim() != confirm.text.trim()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Passwords do not match")),
-      );
+    final passwordError = _validatePassword(passwordText);
+    if (passwordError != null) {
+      setState(() {
+        _passwordError = passwordError;
+        _showPasswordGuide = true;
+      });
+      _showMessage(passwordError);
       return;
     }
 
-    if (business.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Business name is required")),
-      );
+    if (confirmText.isEmpty) {
+      _showMessage("Confirm password is required");
+      return;
+    }
+
+    if (passwordText != confirmText) {
+      _showMessage("Passwords do not match");
+      return;
+    }
+
+    if (businessName.isEmpty) {
+      _showMessage("Business name is required");
       return;
     }
 
@@ -62,8 +108,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => loading = true);
 
       final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email.text.trim(),
-        password: password.text.trim(),
+        email: emailText,
+        password: passwordText,
       );
 
       final user = cred.user;
@@ -76,9 +122,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       await StoreService().createStoreForOwner(
         ownerUid: user.uid,
-        email: email.text.trim(),
-        ownerName: name.text.trim(),
-        businessName: business.text.trim(),
+        email: emailText,
+        ownerName: fullName,
+        businessName: businessName,
       );
 
       await user.sendEmailVerification();
@@ -88,7 +134,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => VerifyEmailScreen(email: email.text.trim()),
+          builder: (_) => VerifyEmailScreen(email: emailText),
         ),
       );
     } on FirebaseAuthException catch (e) {
@@ -104,27 +150,84 @@ class _RegisterScreenState extends State<RegisterScreen> {
         message = "Password is too weak.";
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } catch (_) {
+      _showMessage(message);
+    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Something went wrong. Try again.")),
-      );
+      _showMessage("Something went wrong: $e");
     } finally {
       if (mounted) setState(() => loading = false);
     }
   }
 
-  @override
-  void dispose() {
-    name.dispose();
-    email.dispose();
-    password.dispose();
-    confirm.dispose();
-    business.dispose();
-    super.dispose();
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Widget _buildPasswordRule(String text, bool passed) {
+    return Row(
+      children: [
+        Icon(
+          passed ? Icons.check_circle : Icons.cancel,
+          size: 18,
+          color: passed ? Colors.green : Colors.red,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: TextStyle(
+            color: passed ? Colors.green.shade700 : Colors.red.shade700,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _passwordGuideCard() {
+    final value = password.text.trim();
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.red.shade200),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Password must contain:",
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildPasswordRule("At least 8 characters", _hasMinLength(value)),
+          const SizedBox(height: 6),
+          _buildPasswordRule("One uppercase letter", _hasUppercase(value)),
+          const SizedBox(height: 6),
+          _buildPasswordRule("One lowercase letter", _hasLowercase(value)),
+          const SizedBox(height: 6),
+          _buildPasswordRule("One number", _hasNumber(value)),
+          const SizedBox(height: 6),
+          _buildPasswordRule("One special character", _hasSpecialChar(value)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -193,6 +296,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.person,
                               ),
                               SizedBox(height: fieldGap),
+
                               _label("Email"),
                               CustomTextField(
                                 controller: email,
@@ -201,15 +305,51 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.email,
                               ),
                               SizedBox(height: fieldGap),
+
                               _label("Password"),
-                              CustomTextField(
-                                controller: password,
-                                label: "Password",
-                                hintText: "••••••••",
-                                icon: Icons.lock,
-                                isPassword: true,
+                              Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: _passwordError != null
+                                        ? Colors.red
+                                        : Colors.transparent,
+                                    width: 1.4,
+                                  ),
+                                ),
+                                child: CustomTextField(
+                                  controller: password,
+                                  label: "Password",
+                                  hintText: "••••••••",
+                                  icon: Icons.lock,
+                                  isPassword: true,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _showPasswordGuide = value.isNotEmpty;
+                                      _passwordError = _validatePassword(value);
+                                    });
+                                  },
+                                ),
                               ),
+
+                              if (_showPasswordGuide) _passwordGuideCard(),
+
+                              if (_passwordError != null &&
+                                  password.text.trim().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    _passwordError!,
+                                    style: const TextStyle(
+                                      color: Colors.red,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+
                               SizedBox(height: fieldGap),
+
                               _label("Confirm Password"),
                               CustomTextField(
                                 controller: confirm,
@@ -219,6 +359,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 isPassword: true,
                               ),
                               SizedBox(height: fieldGap),
+
                               _label("Business Name"),
                               CustomTextField(
                                 controller: business,
@@ -227,6 +368,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 icon: Icons.business_center,
                               ),
                               SizedBox(height: isSmallPhone ? 12 : 14),
+
                               Center(
                                 child: SizedBox(
                                   width: buttonWidth,

@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../../firebase/stock_movement_auth.dart';
 import '../transaction/transaction_screen.dart';
 
 enum InventoryMenuAction {
@@ -11,6 +10,12 @@ enum InventoryMenuAction {
   editItem,
   inventoryOverview,
   batchDetails,
+  addStock,
+  reduceStock,
+  pullOutStock,
+}
+
+enum InventoryMovementType {
   addStock,
   reduceStock,
   pullOutStock,
@@ -25,7 +30,6 @@ class StaffInventoryScreen extends StatefulWidget {
 
 class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final StockMovementService _movementService = StockMovementService();
 
   late final Future<_StaffStoreAccess> _storeAccessFuture;
 
@@ -302,6 +306,111 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
     }
   }
 
+  String _movementValue(InventoryMovementType type) {
+    switch (type) {
+      case InventoryMovementType.addStock:
+        return 'add_stock';
+      case InventoryMovementType.reduceStock:
+        return 'reduce_stock';
+      case InventoryMovementType.pullOutStock:
+        return 'pull_out_stock';
+    }
+  }
+
+  int _calculateNewStock({
+    required InventoryMovementType type,
+    required int currentStock,
+    required int quantity,
+  }) {
+    switch (type) {
+      case InventoryMovementType.addStock:
+        return currentStock + quantity;
+      case InventoryMovementType.reduceStock:
+      case InventoryMovementType.pullOutStock:
+        final newStock = currentStock - quantity;
+        if (newStock < 0) {
+          throw Exception('Quantity exceeds current stock.');
+        }
+        return newStock;
+    }
+  }
+
+  Future<void> _applyMovement({
+    required InventoryMovementType type,
+    required InventoryItem item,
+    required int quantity,
+    required String note,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception('Not logged in.');
+    }
+
+    final access = await _storeAccessFuture;
+    final firestore = FirebaseFirestore.instance;
+
+    final itemRef = firestore
+        .collection('stores')
+        .doc(access.storeId)
+        .collection('items')
+        .doc(item.id);
+
+    final movementRef = firestore
+        .collection('stores')
+        .doc(access.storeId)
+        .collection('stock_movements')
+        .doc();
+
+    await firestore.runTransaction((transaction) async {
+      final itemSnap = await transaction.get(itemRef);
+
+      if (!itemSnap.exists) {
+        throw Exception('Item not found.');
+      }
+
+      final data = itemSnap.data() ?? <String, dynamic>{};
+
+      final rawStock = data['stockQty'] ?? data['stock'] ?? data['quantity'];
+      int currentStock = 0;
+
+      if (rawStock is int) {
+        currentStock = rawStock;
+      } else if (rawStock is double) {
+        currentStock = rawStock.toInt();
+      } else if (rawStock is String) {
+        currentStock = int.tryParse(rawStock) ?? 0;
+      }
+
+      final newStock = _calculateNewStock(
+        type: type,
+        currentStock: currentStock,
+        quantity: quantity,
+      );
+
+      transaction.update(itemRef, {
+        'stockQty': newStock,
+        'stock': newStock,
+        'quantity': newStock,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      transaction.set(movementRef, {
+        'itemId': item.id,
+        'itemName': item.name,
+        'type': _movementValue(type),
+        'quantity': quantity,
+        'previousStock': currentStock,
+        'newStock': newStock,
+        'note': note,
+        'storeId': access.storeId,
+        'storeName': access.storeName,
+        'performedBy': user.uid,
+        'performedByRole': access.role,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
   List<PopupMenuEntry<InventoryMenuAction>> _buildInventoryMenuItems(
     _StaffStoreAccess access,
   ) {
@@ -326,6 +435,19 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
         PopupMenuItem<InventoryMenuAction>(
           value: InventoryMenuAction.batchDetails,
           child: Text('Batch Details'),
+        ),
+        PopupMenuDivider(),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.addStock,
+          child: Text('Add Stock'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.reduceStock,
+          child: Text('Reduce Stock'),
+        ),
+        PopupMenuItem<InventoryMenuAction>(
+          value: InventoryMenuAction.pullOutStock,
+          child: Text('Pull Out Stock'),
         ),
       ];
     }
@@ -450,19 +572,25 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
                 return;
               }
 
+              final currentStock = item.stockQty ?? 0;
+              if ((type == InventoryMovementType.reduceStock ||
+                      type == InventoryMovementType.pullOutStock) &&
+                  qty > currentStock) {
+                setDialogState(() {
+                  errorText = 'Quantity exceeds current stock.';
+                });
+                return;
+              }
+
               setDialogState(() {
                 isSaving = true;
                 errorText = null;
               });
 
               try {
-                final access = await _storeAccessFuture;
-
-                await _movementService.applyMovement(
-                  storeId: access.storeId,
+                await _applyMovement(
                   type: type,
-                  itemId: item.id,
-                  itemName: item.name,
+                  item: item,
                   quantity: qty,
                   note: noteCtrl.text.trim(),
                 );
@@ -474,7 +602,7 @@ class _StaffInventoryScreenState extends State<StaffInventoryScreen> {
               } catch (e) {
                 setDialogState(() {
                   isSaving = false;
-                  errorText = e.toString();
+                  errorText = e.toString().replaceFirst('Exception: ', '');
                 });
               }
             }
@@ -1524,6 +1652,7 @@ class _StaffItemCardCompact extends StatelessWidget {
   Widget build(BuildContext context) {
     final stock = item.stockQty ?? 0;
     final hasStock = item.trackStock && item.stockQty != null;
+    final isOutOfStock = hasStock && stock <= 0;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -1592,27 +1721,31 @@ class _StaffItemCardCompact extends StatelessWidget {
                             'Stock: $stock',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: Colors.black54,
+                              color: isOutOfStock ? Colors.red : Colors.black54,
                               fontWeight: FontWeight.w500,
                             ),
                           )
                         : const SizedBox.shrink(),
                   ),
                   GestureDetector(
-                    onTap: onAdd,
+                    onTap: isOutOfStock ? null : onAdd,
                     child: Container(
                       width: 30,
                       height: 30,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFFFFF).withAlpha(210),
+                        color: isOutOfStock
+                            ? Colors.grey.withAlpha(160)
+                            : const Color(0xFFFFFFFF).withAlpha(210),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.add_rounded,
                         size: 18,
-                        color: Color(0xFF33AAA0),
+                        color: isOutOfStock
+                            ? Colors.white70
+                            : const Color(0xFF33AAA0),
                       ),
                     ),
                   ),

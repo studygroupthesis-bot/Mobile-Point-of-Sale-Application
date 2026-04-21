@@ -5,7 +5,7 @@ import '../../firebase/store_staff_services.dart';
 
 class AddEditUserScreen extends StatefulWidget {
   final String storeId;
-  final String? staffUid; // null = add, not null = edit
+  final String? staffUid;
 
   const AddEditUserScreen({
     super.key,
@@ -28,6 +28,9 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
   String _role = 'staff';
   bool _saving = false;
   bool _initialized = false;
+
+  bool _isActive = true;
+  bool _mustChangePassword = true;
 
   bool _viewInventory = true;
   bool _addStock = true;
@@ -114,6 +117,24 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
     };
   }
 
+  String? _validatePassword(String value) {
+    if (value.isEmpty) return 'Password is required';
+    if (value.length < 8) return 'Password must be at least 8 characters';
+    if (!RegExp(r'[A-Z]').hasMatch(value)) {
+      return 'Add at least one uppercase letter';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(value)) {
+      return 'Add at least one lowercase letter';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(value)) {
+      return 'Add at least one number';
+    }
+    if (!RegExp(r'[!@#$%^&*(),.?":{}|<>_+=\-\\/]').hasMatch(value)) {
+      return 'Add at least one special character';
+    }
+    return null;
+  }
+
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
@@ -135,11 +156,14 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
       return;
     }
 
-    if (!isEdit && pass.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password is required')),
-      );
-      return;
+    if (!isEdit) {
+      final passwordError = _validatePassword(pass);
+      if (passwordError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(passwordError)),
+        );
+        return;
+      }
     }
 
     setState(() => _saving = true);
@@ -153,6 +177,8 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
           phone: phone,
           role: _role,
           permissions: permissions,
+          isActive: _isActive,
+          mustChangePassword: _mustChangePassword,
         );
       } else {
         await _svc.createStaff(
@@ -258,6 +284,9 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
                       _emailCtrl.text = (data['email'] as String?) ?? '';
                       _phoneCtrl.text = (data['phone'] as String?) ?? '';
                       _role = (data['role'] as String?) ?? 'staff';
+                      _isActive = (data['isActive'] as bool?) ?? true;
+                      _mustChangePassword =
+                          (data['mustChangePassword'] as bool?) ?? false;
                       _loadPermissions(data);
                       _initialized = true;
                     }
@@ -317,6 +346,29 @@ class _AddEditUserScreenState extends State<AddEditUserScreen> {
                       _role = v ?? 'staff';
                     });
                   },
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            value: _isActive,
+            onChanged: _saving
+                ? null
+                : (v) {
+                    setState(() => _isActive = v);
+                  },
+            title: const Text('Active Account'),
+            subtitle: const Text('Turn off to block login access'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _mustChangePassword,
+            onChanged: _saving
+                ? null
+                : (v) {
+                    setState(() => _mustChangePassword = v);
+                  },
+            title: const Text('Force Password Change'),
+            subtitle: const Text('Require password update on next login'),
+            contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 16),
           if (_role == 'staff') ...[
