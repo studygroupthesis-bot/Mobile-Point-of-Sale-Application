@@ -33,8 +33,10 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw Exception('Not logged in.');
 
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
 
     final storeId = snap.data()?['storeId'] as String?;
     if (storeId == null || storeId.isEmpty) {
@@ -47,8 +49,10 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
 
-    final snap =
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
 
     final role = (snap.data()?['role'] ?? '').toString().toLowerCase();
     return role == 'admin' || role == 'owner';
@@ -136,6 +140,10 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
         return const Color(0xFFD32F2F);
       case 'pull_out':
         return const Color(0xFF6A1B9A);
+      case 'refund_return':
+        return const Color(0xFF1565C0);
+      case 'refund_no_restock':
+        return const Color(0xFFEF6C00);
       default:
         return const Color(0xFF455A64);
     }
@@ -373,8 +381,7 @@ class _StockLogsScreenState extends State<StockLogsScreen> {
                                               _readString(d, ['itemName']),
                                               _readString(d, ['stockInCode']),
                                               _readString(d, ['batchCode']),
-                                              _readString(
-                                                  d, ['encodedByName']),
+                                              _readString(d, ['encodedByName']),
                                               _readString(
                                                   d, ['encodedByEmail']),
                                               _readString(d, ['type']),

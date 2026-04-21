@@ -7,6 +7,7 @@ import 'manage_users_screen.dart';
 import 'store_settings_screen.dart';
 import 'data_sync_screen.dart';
 import '../auth/login_screen.dart';
+import '../transaction/refund_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -34,7 +35,7 @@ class ProfileScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                children: [
+                children: const [
                   SizedBox(width: 5),
                   Text(
                     "My Business",
@@ -80,9 +81,16 @@ class ProfileScreen extends StatelessWidget {
                             .doc(uid)
                             .snapshots(),
                         builder: (context, snap) {
-                          final data = snap.data?.data();
-                          final role = (data?['role'] as String?) ?? '';
+                          final data = snap.data?.data() ?? {};
+                          final role =
+                              (data['role'] as String?)?.toLowerCase() ?? '';
+                          final permissions =
+                              (data['permissions'] as Map<String, dynamic>?) ??
+                                  {};
+
                           final isAdmin = role == 'admin';
+                          final canRefundItems =
+                              isAdmin || (permissions['refundItems'] == true);
 
                           return Column(
                             children: [
@@ -119,17 +127,47 @@ class ProfileScreen extends StatelessWidget {
                                       }
                                     : null,
                               ),
+                              _menuItem(
+                                icon: Icons.undo_rounded,
+                                title: "Refund Items",
+                                subtitle: canRefundItems
+                                    ? "Verify receipt and process item refunds"
+                                    : "Permission required",
+                                enabled: canRefundItems,
+                                onTap: canRefundItems
+                                    ? () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const RefundScreen(),
+                                          ),
+                                        );
+                                      }
+                                    : null,
+                              ),
                             ],
                           );
                         },
                       )
                     else
-                      _menuItem(
-                        icon: Icons.store_mall_directory,
-                        title: "Store Settings",
-                        subtitle: "Admin only",
-                        enabled: false,
-                        onTap: null,
+                      Column(
+                        children: [
+                          _menuItem(
+                            icon: Icons.store_mall_directory,
+                            title: "Store Settings",
+                            subtitle: "Admin only",
+                            enabled: false,
+                            onTap: null,
+                          ),
+                          _menuItem(
+                            icon: Icons.undo_rounded,
+                            title: "Refund Items",
+                            subtitle: "Permission required",
+                            enabled: false,
+                            onTap: null,
+                          ),
+                        ],
                       ),
                     _menuItem(
                       icon: Icons.cloud_sync,

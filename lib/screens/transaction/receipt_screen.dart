@@ -60,10 +60,16 @@ class ReceiptScreen extends StatelessWidget {
   final ReceiptData data;
   final String? receiptUrl;
 
+  /// Optional refund hook.
+  final bool showRefundButton;
+  final VoidCallback? onRefundPressed;
+
   const ReceiptScreen({
     super.key,
     required this.data,
     this.receiptUrl,
+    this.showRefundButton = false,
+    this.onRefundPressed,
   });
 
   String _peso(double value) {
@@ -236,6 +242,27 @@ class ReceiptScreen extends StatelessWidget {
                       size: 220,
                     ),
                   ],
+                ),
+              ),
+            ],
+            if (showRefundButton && onRefundPressed != null) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: onRefundPressed,
+                  icon: const Icon(Icons.undo_rounded),
+                  label: const Text(
+                    'Refund Item',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2F9E9C),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
                 ),
               ),
             ],
